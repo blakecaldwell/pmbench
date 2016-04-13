@@ -1,0 +1,68 @@
+# argp for Windows source files obtained form 'madp-win' project:
+#
+# The files here were downloaded on January 13, 2014 from 
+# http://code.google.com/p/madp-win/source/browse/#hg%2Fsrc%2Fargp-standalone-1.3
+# 
+
+CC = gcc
+
+# Windows cross-platform compilation. Choose your mingw32 compiler name! 
+WCC := i686-pc-mingw32-gcc
+#WCC := i686-w64-mingw32-gcc
+#WCC := x86_64-w64-mingw32-gcc
+
+CFLAGS := -g -O2 -Wall
+#CFLAGS += -Wno-implicit-function-declaration
+CFLAGS += -D_alloca=__builtin_alloca
+CFLAGS += -DHAVE_STRNDUP
+
+CFLAGS_LINUX := -fpic
+LFLAGS_LINUX :=
+CFLAGS_LINUX += -pthread
+LFLAGS_LINUX += -pthread
+
+#Compatible with Windows XP and after
+CFLAGS_WIN := -D_WIN32_WINNT=0x0501
+
+all: libmyargp.a libmyargp.so argp.dll
+
+.SUFFIXES: .c .obj .o
+
+%.o : %.c
+	$(CC) $(CFLAGS) $(CFLAGS_LINUX) -o $@ -c $<
+
+%.obj : %.c
+	$(WCC) $(CFLAGS) $(CFLAGS_WIN) -o $@ -c $<
+
+.PHONY: all clean
+
+LIB_OBJS_LIN := argp-eexst.o argp-help.o argp-pvh.o argp-parse.o argp-fmtstream.o \
+mempcpy.o strchrnul.o strcasecmp.o strndup.o argp-pv.o argp-ba.o
+
+LIB_OBJS_WIN := argp-eexst.obj argp-help.obj argp-pvh.obj argp-parse.obj argp-fmtstream.obj \
+mempcpy.obj strchrnul.obj strcasecmp.obj strndup.obj argp-pv.obj argp-ba.obj
+
+#######################################################
+# Library build - Linux
+
+libmyargp.a: $(LIB_OBJS_LIN)
+	ar -rusvc $@ $+
+
+libmyargp.so: $(LIB_OBJS_LIN)
+	$(CC) -shared -o $@ $^
+
+#######################################################
+# Library build - Windows
+argp.dll: $(LIB_OBJS_WIN)
+	$(WCC) -shared -o $@ $^
+
+
+
+clean:
+	@rm  -f argp.dll *.obj *.o libmyargp.a libmyargp.so
+
+
+
+
+
+

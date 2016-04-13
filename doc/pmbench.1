@@ -1,0 +1,285 @@
+.\" groff -man -Tascii pmbench.1
+.\" Manpage for pmbench..
+.TH PMBENCH 1 "January 2014" "pmbench v0.7" "User Commands"
+.SH NAME
+pmbench \- paging and virtual memory benchmark
+.SH SYNOPSIS
+.B pmbench 
+[OPTIONS...] \fIduration\fP
+.SH DESCRIPTION
+\fBpmbench\fP is a micro-benchmark that profiles system paging performance by measuring latencies of
+each memory access throughout the run and reporting the statistics of measured latencies.
+.P
+Upon start, \fBpmbench\fP allocates a large memory map in its virtual address space.
+The main benchmark runs for \fIduration\fP seconds accessing the memory map continuously,
+changing the offset of the accesses each time following a user-specified pattern.
+The benchmark measures the latency of each access to count the number 
+of accesses that fall within certain latency ranges.
+The resulting frequency histogram of access latencies is included as part of
+the benchmark report generated at the end.
+.P
+\fBpmbench\fP is intended to profile system paging and swap performance characteristics.
+As such, it is expected to configure the system in such a way that 
+\fBpmbench\fP accesses a map larger than physically available,
+triggering system paging or swap during the run.
+.P
+\fBpmbench\fP allows users to specify a memory access pattern in order to simulate the 
+locality of page accesses. See Usage and Examples below for details.
+.P
+\fBpmbench\fP is a multi-threaded benchmark that supports both Linux and Windows.
+This document is written assuming Linux \- Windows difference is noted when needed.
+
+.SH OPTIONS
+.P
+\fB-m, --mapsize\fP=MAPSIZE_MB
+.RS
+Specify virtual address map size in Mebibyte (2^20 bytes) unit. The default is 256.
+.RE
+.P
+\fB-s, --setsize\fP=SETSIZE_MB
+.RS
+Specify working set size in Mebibyte unit.
+It should be no greater than mapsize. The default is 128.
+.RE
+.P
+\fB-p, --pattern\fP=PATTERN_NAME
+.RS
+Specify the pattern of page access distribution.
+It can be one of `linear', `uniform', `normal', `pareto', or `zipf'.
+The default is `uniform'. See Usage for details.
+(Zipf is currently unsupported.)
+.RE
+.P
+\fB-e, --shape\fP=SHAPE_VALUE
+.RS
+Pattern-specific numeric parameter that determines the shape of the distribution.
+See Usage for details.
+.RE
+.P
+\fB-j, --jobs\fP=NUM_THREADS
+.RS
+Number of concurrent worker threads to spawn for the benchmark.
+Some releases may not support this option. The default is 1.
+.RE
+.P
+\fB-t, --timestamp\fP=TIMESTAMP_METHOD
+.RS
+Specify system time-measurement method. Choose from `rdtsc', `rdtscp', or `perfc'.
+`rdtsc' uses the \fIrdtsc\fP x86 machine instruction;
+`rdtscp' uses the \fIrdtscp\fP instruction if avaiable; 
+`perfc' uses a system call for high-resolution performance-counter if available.
+The default is `rdtsc'.
+.RE
+.P
+\fB-q, --quiet\fP
+.RS
+Do not display any message till benchmark completion.
+.RE
+.P
+\fB-c, --cold\fP
+.RS
+Do not perform warm-up accesses before the main benchmark.
+.RE
+.P
+\fB-a, --access\fP=ACCESS_METHOD
+.RS
+(Under development) Specify memory access method.
+Choose from `histo' or `touch'. The default is `histo'.
+.RE
+
+.P
+\fB-?, --help\fP
+.RS
+Give the help list.
+.RE
+.P
+\fB--usage\fP
+.RS
+Give a short usage message.
+.RE
+.P
+\fB-V, --version\fP
+.RS
+Print program version.
+.RE
+
+
+.SH USAGE
+The \fBpattern\fP and \fBshape\fP parameters control the generation of the number sequence
+that the benchmark uses as the page-number offset for the next memory access. 
+The range of the number sequence is [0, \fIsetsize\fP-1], where \fIsetsize\fP
+is the page count number converted from the SETSIZE_MB value into 4K page unit.
+The meaning of the shape value differs by pattern. Available patterns are:
+.P
+\fBlinear\fP
+.RS
+Deterministic linear increment with increment value 
+in page count specified by \fBshape\fP, which is a positive integer.
+Wrap-around logic at the end guarantees all page frames within the set are accessed eventually.
+The default shape value is 1.
+.RE
+.P
+\fBuniform\fP
+.RS
+Discrete uniform distribution where every page frame is equally likely to be 
+selected. \fBshape\fP has no meaning and is ignored.
+.RE
+.P
+\fBnormal\fP
+.RS
+Approximated and discretized Gaussian distribution. The probability mass function plots 
+the bell-curve where the mean is around \fIsetsize\fP/2 and the standard deviation is
+set to the \fBshape\fP value. The default shape value is 1.
+.RE
+.P
+\fBpareto\fP
+.RS
+Approximated and discretized Bounded Pareto distribution where the Pareto index 
+(i.e., alpha) is specified by \fBshape\fP, which is a positive real number. 
+The default shape value is 1.
+(This distribution will be replaced by zipf distribution in near future)
+.RE
+.P
+\fBzipf\fP
+.RS
+Zipf distribution where the `s' parameter is specified by \fBshape\fP value, which is a
+real number greater than 1.
+.RE
+
+.P
+Although all worker threads share the memory map, each worker thread keeps its own 
+pattern generator state. Threads share the latency statistics data structure.
+.P
+Unless \fB-c\fP or \fB--cold\fP is specified, the benchmark performs a warm-up exercise 
+prior to main measurement. The warm-up uses the same pattern and is performed by all threads.
+
+.SH EXAMPLES
+\fBpmbench\fP 60
+.RS
+Measure the page access latencies for one minute using the default parameters.
+.RE
+.P
+\fBnice\fP -n-10 \fBpmbench\fP -j4 -puniform -m1024 -s1024 30
+.RS
+Run the benchmark with a higher priority in Linux.
+The benchmark itself spawns 4 threads accessing pages on a 1GiB map
+in a uniformly random fashion for 30 seconds. 
+This uniform pattern may stress the underlying paging subsystem most heavily.
+.RE
+.P
+\fBpmbench\fP -plinear -e23 -m2048 -s2048 --cold 300
+.RS
+The benchmark accesses a 2GiB map starting from page zero then every 23 pages.
+When it reaches at end of the map, it starts from page one then every 23 pages, and so on.
+The benchmark starts without a warm-up and runs for 5 minutes.
+.P
+This linear pattern generates a worst-case access sequence for simple LRU-based paging algorithms, 
+thus has the potential to trigger major faults (hard faults) for the entire accesses.
+
+.RE
+.P
+\fBpmbench\fP --pattern=normal --shape=1536 --mapsize=2048 --setsize=1024 30
+.RS
+The benchmark creates a 2GiB memory map and then accesses only the first 1GiB 
+part of the map, following a Gaussian distribution. The pages around at the 512MiB offset 
+point (mean) are most likely to be accessed,
+68% of accesses lie within the 3072 pages (12MiB) between 506MiB - 518MiB range (one sigma), 
+95% lie within the 6144 pages (24MiB) between 500MiB - 524MiB range (two sigma),
+and so on. 
+.P
+Beware that the outlier pages far from the mean (e.g., 6 sigma and beyond) have almost zero
+chance of being accessed. In this example, the pages between 0MiB-400MiB as well as
+between 600MiB-1024MiB will be very unlikely accessed at all.
+.RE
+.P
+\fBpmbench\fP -ppareto -e1.161 -m4096 -s4096 60
+.RS
+Run the main benchmark for one minute randomly accessing pages on a 4GiB map 
+following the Pareto distribution with alpha of 1.161.
+This parameter simulates the `80-20 law': 80% of all accesses happen on the 20% of pages;
+of this 20%, another 20% receives 80% of that 80% of accesses, and so on.
+.P
+Unlike the normal distribution, this pattern has a long-tail, which can be a 
+good proxy for a real-world page access pattern.
+.RE
+
+.SH "BENCHMARK REPORT"
+At the end of the run, a human-readable report is generated to the standard output.
+The report is divided into multiple sections. 
+The first two `Benchmark signature' and `Machine information' sections are self-explanatory. 
+.P
+The `Average access latency' section reports the average per-thread access latencies.
+This number is useful to assess how much progress the thread was able to make during the run.
+.P
+The `Statistics' section shows the histogram of access latencies in a log scale.
+Each row represents a latency band. The row starts with `2^(\fBA\fP, \fBB\fP) ns',
+which means the band counts the number of accesses that took between 
+2^\fBA\fP and 2^\fBB\fP nanoseconds.
+The number next is the count.
+The next sixteen numbers in a bracket, if present, break down the count into 
+sixteen sub-ranges equally divided within the band. 
+.P
+For example, this line
+.P
+2^(12,13) ns: 6853  [442, 162, 16, 0, 0, 0, 0, 0, 0, 0, 1, 99, 1404, 2008, 1682, 1039]
+.P
+reports that there are 6853 memory accesses that took between 4.096 and 8.192 microseconds.
+Among them,
+442 accesses took between 4.096us and 4.352us, 
+162 took between 4.352us and 4.608us,
+16 took between 4.608us and 4.864us, and so on.
+.P
+The last `System memory information' section logs the changes of relevant operating system 
+statistics during the entire course of a benchmark. In Linux, pmbench obtains this information
+by reading from `meminfo' and `vmstat' proc entries. See Linux documents and sources for 
+their meanings.
+
+.SH NOTES
+pmbench can induce a huge amount of paging and swapping activity which heavily stresses 
+the system under test.
+System unstabilities have been observed, especially if it runs with high priorities. 
+Experiment at your own risk.
+.P
+Knowledges on the raw drive characteristics of the backing swap device is critical 
+to correctly interpret the benchmark result.
+This benchmark is most useful when a high-performance SSD is used as the swap device.
+.P
+When estimating a working set size, remember the fact that the processor keeps 
+accessing the program code and stack pages as well. The code and 
+stack may span across multiple pages.
+Most system paging policies must be able to keep these pages in memory most of the time.
+.P
+In many situations, it is hard to accurately tell how much physical memory was actually 
+available to a particular program because of memory needs from other running processes, 
+pages that are locked, kernel resident memories, etc.
+Note that setrlimit with RLIMIT_RSS parameter does not work in a typical Linux setup.
+In some other situations, such as when cgroup is employed or running within a virtualized environment, 
+a fine control of the resident set size may be possible.
+.P
+To prevent interference, pmbench does not update the progress of the run during the 
+actual measurement phase.
+A user may interrupt the benchmark in the middle by sending a SIGINT signal
+(e.g., ctrl-c), and this will usually produce a report using the data so far collected.
+.\".P
+.\"pmbench relies on system rdtsc counter to be constant and invariable. 
+
+.\".SH INTERPRETING RESULTS
+
+
+.SH "SEE ALSO"
+.BR getrlimit (2)
+.\".BR getrlimit (2)
+
+.SH BUGS
+Command syntax, options, and features will change significantly in future,
+at least until v1.0 release. Listed below are known issues that will be fixed in future releases.
+.P
+In Windows, rdtsc based timestamp measures can be inaccurate depending on platforms. 
+Windows version needs a serious timestamp calibration routine in order for the rdtsc method to be 
+more reliable. Use perfc instead.
+.P
+User can't control the length of warm-up - it may take very very long in certain configurations.
+.SH TRADEMARKS
+Windows is a registered trademark of Microsoft Corporation.
+.SH AUTHOR
+Written by Jisoo Yang <jisoo.yang@intel.com>

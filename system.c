@@ -1,0 +1,873 @@
+/*
+   Copyright (c) 2014, Intel Corporation
+   All rights reserved.
+  
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions are met:
+ 
+       * Redistributions of source code must retain the above copyright
+         notice, this list of conditions and the following disclaimer.
+       * Redistributions in binary form must reproduce the above copyright
+         notice, this list of conditions and the following disclaimer in the
+         documentation and/or other materials provided with the distribution.
+       * Neither the name of Intel Corporation nor the names of its
+         contributors may be used to endorse or promote products derived from
+         this software without specific prior written permission.
+   
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+   POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
+ * Written by: Jisoo Yang <jisoo.yang@intel.com>
+ */
+
+#define _GNU_SOURCE
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <inttypes.h>
+
+#ifdef _WIN32
+#include <memory.h>
+#include <io.h>
+#include <windows.h>
+#include <rpcdce.h> /* for UuidCreate */
+#include "argp.h"
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#include <argp.h>
+#include <sys/utsname.h>
+#include <time.h>
+#include <uuid/uuid.h>
+#endif
+
+#include "system.h"
+
+#include "rdtsc.h"
+#include "cpuid.h"
+#include "pattern.h"
+
+/*
+ * for leaf with ecx subleaf, this structure only caches ECX=0 leaf. 
+ */
+struct cpuid_struct {
+    unsigned leaf_pop;
+    unsigned leaf_ex_pop;
+    struct {
+	unsigned r[4];
+    } leaf[16], leaf_ex[10];
+}; 
+
+static struct cpuid_struct cpuid_local = {
+    .leaf_pop = 0u,
+    .leaf_ex_pop = 0u,
+};
+
+
+static 
+void cpuid_populate_local_leaf(unsigned idx)
+{
+    idx &= 0x0f;
+    static const int A = 0, B = 1, C = 2, D = 3;
+    unsigned* r = cpuid_local.leaf[idx].r;
+
+    r[A] = idx;
+    r[C] = 0;
+    _sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
+    cpuid_local.leaf_pop |= (1u << idx);
+}
+
+static inline
+int is_leaf_supported_idx(unsigned idx)
+{
+    unsigned eax = idx & 0x0f;
+
+    if (eax >= 0x0E) return 0;
+    if (!(cpuid_local.leaf_pop & 0x01)) cpuid_populate_local_leaf(0);
+
+    if (cpuid_local.leaf[0].r[0] < eax) return 0;
+
+    return 1;
+}
+
+static 
+void cpuid_populate_local_leaf_ex(unsigned idx)
+{
+    static const int A = 0, B = 1, C = 2, D = 3;
+    unsigned* r = cpuid_local.leaf_ex[idx & 0x0f].r;
+
+    r[A] = 0x80000000 | idx;
+    r[C] = 0;
+    _sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
+    cpuid_local.leaf_ex_pop |= (1u << (idx & 0x0f));
+}
+
+/*
+ * ex_idx can be either 0x800000idx or idx
+ */
+static
+int is_leaf_ex_supported_idx(unsigned ex_idx)
+{
+    unsigned eax = 0x80000000u | ex_idx;
+    ex_idx &= 0x0f; 
+
+    if (eax >= 0x8000000A) return 0;
+    if (!(cpuid_local.leaf_ex_pop & 0x01)) cpuid_populate_local_leaf_ex(0);
+
+    if (cpuid_local.leaf_ex[0].r[0] < eax) return 0;
+
+    return 1;
+}
+
+/****************************/
+
+int is_rdtscp_available(void)
+{
+    if (!is_leaf_ex_supported_idx(1)) return 0;
+
+    if (!(cpuid_local.leaf_ex_pop & (1 << 1))) {
+	cpuid_populate_local_leaf_ex(1);
+    }
+    
+    /* bit 27 of EDX */
+    if (cpuid_local.leaf_ex[1].r[3] & (1u << 27)) return 1;
+    return 0;
+}
+
+int is_tsc_invariant(void)
+{
+    if (!is_leaf_ex_supported_idx(7)) return 0;
+
+    if (!(cpuid_local.leaf_ex_pop & (1 << 7))) {
+	cpuid_populate_local_leaf_ex(7);
+    }
+    /* bit 8 of EDX */
+    if (cpuid_local.leaf_ex[7].r[3] & 0x100) return 1;
+    return 0;
+}
+
+/* 
+ * when detected, returns string length, including the null character.
+ * This functions strips away the leading white spaces.
+ * returns 0 when string is unsupported.
+ */
+int __cpuid_obtain_model_string(char* buf)
+{
+    char* src, *buf_start = buf;
+
+    if (!is_leaf_ex_supported_idx(4)) {
+	buf[0] = 0;
+	return 0;
+    }
+    if (!(cpuid_local.leaf_ex_pop & (1 << 2))) cpuid_populate_local_leaf_ex(2);
+    if (!(cpuid_local.leaf_ex_pop & (1 << 3))) cpuid_populate_local_leaf_ex(3);
+    if (!(cpuid_local.leaf_ex_pop & (1 << 4))) cpuid_populate_local_leaf_ex(4);
+    
+    /*
+     * We take advantage the way cpuid_local is structured:
+     * (at least x86 SYSV ABI dictates it)
+     * the leaves and registers are adjacent in order so 
+     * simple string copy (memcopy) 
+     */
+    src = (char*)cpuid_local.leaf_ex[2].r;
+    while (*src == ' ') src++;
+    
+    while ((*buf++ = *src++) != 0);
+    return (int)(buf - buf_start);
+}
+
+/* @output must be at least 16 bytes long */
+static inline 
+int __cpuid_cache_tlb_info(unsigned char* output)
+{
+    static const int A = 0, B = 1, C = 2, D = 3;
+    unsigned r[4];
+    unsigned char* c;
+    unsigned char* save = output;
+    int rep, i;
+
+    c = (unsigned char*)r;
+
+    r[A] = 2; r[C] = 0;
+    _sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
+
+    rep = (int)r[A] & 0xFF;
+
+    do {
+	for (i = 1; i < 16; ++i) {
+	    if (c[i]) *output++ = c[i];
+	}
+	rep--;
+	if (!rep) break;
+	r[A] = 2; r[C] = 0;
+	_sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
+    } while (1);
+    return (int)(output - save);
+}
+
+/* these are not zero-based values */
+struct cpu_cache_info {
+    unsigned sets;
+    short linesize;
+    short partitions;
+    short ways;
+    short level;
+    enum {
+	DATACACHE = 1,
+	INSTCACHE,
+	UNICACHE
+    } cachetype;
+};
+
+struct cpu_cache_info_ebx_encode {
+    unsigned int z_linesize:12;
+    unsigned int z_partition:10;
+    unsigned int z_way:10;
+};
+
+/* 
+ * structured cache info (EAX=0x04) 
+ * returns cache items + 1
+ */
+static inline
+int __cpuid_deterministic_cache_info(struct cpu_cache_info* output, int size)
+{
+    static const int A = 0, B = 1, C = 2, D = 3;
+    unsigned r[4];
+    struct cpu_cache_info_ebx_encode* ebx_encode = (void*)&r[B];
+
+    int item;
+
+    for (item = 0; item < size; item++) {
+	r[A] = 4; r[C] = item;
+	_sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
+	if (!(r[A] & 0x1f)) return item;
+	output[item].cachetype = r[A] & 0x1f;
+	output[item].level = (r[A] >> 5) & 0x7;
+
+	output[item].sets = r[C] + 1;
+	output[item].linesize = ebx_encode->z_linesize + 1;
+	output[item].partitions = ebx_encode->z_partition + 1;
+	output[item].ways = ebx_encode->z_way + 1;
+    }
+    return item;
+}
+
+
+/*****************************************************/
+
+void print_tlb_info(void)
+{
+    unsigned char buf[16];
+    int i, len;
+    
+    len = __cpuid_cache_tlb_info(buf);
+    for (i = 0; i < len; i++) {
+	switch (buf[i]) {
+	    CPUID02_TLB_PRN();
+	default:
+	    break;
+	}
+    }
+}
+
+void print_cache_info(void)
+{
+    unsigned char buf[16];
+    struct cpu_cache_info cash[8];
+    unsigned capacity;
+    int i, len, deterministic = 0;
+    
+    len = __cpuid_cache_tlb_info(buf);
+    for (i = 0; i < len; i++) {
+	switch (buf[i]) {
+	    CPUID02_CACHE_PRN();
+	case 0xFF:
+	    deterministic = 1;
+	    break;
+	default:
+	    break;
+	}
+    }
+    if (!deterministic) return;
+
+    memset(cash, 0, sizeof(cash));
+    len = __cpuid_deterministic_cache_info(cash, 8);
+    for (i = 0; i < len; i++) {
+	switch (cash[i].cachetype) {
+	case DATACACHE:
+	    printf("DCACHE:");
+	    break;
+	case INSTCACHE:
+	    printf("ICACHE:");
+	    break;
+	case UNICACHE:
+	    printf("CACHE:");
+	    break;
+	default:
+	    break;
+	}
+	printf(" lvl %d, ", cash[i].level);
+	capacity = cash[i].sets * cash[i].linesize * 
+	    cash[i].partitions * cash[i].ways;
+	printf("%d KB, ", capacity >> 10);
+	printf("sets:%d, linesz:%d, part:%d, ways:%d\n",
+	    cash[i].sets, cash[i].linesize, cash[i].partitions, cash[i].ways);
+    }
+}
+
+/* 
+ * returns frequency in KHz
+ * methodology: time usleep duration with rdtsc.
+ * we're relying on the CPU has constant rate timestamp counter. most modern
+ * CPUs have them.  
+ *
+ * We use simple linear regression to offset error.
+ *   y = ax + b   (x: usleep sec, y: tsc)
+ * we have (x1, y1) and (x2, y2)
+ * then b = (x2*y1)/(x2-x1) - (x1*y2)/(x2-x1)
+ */
+static
+unsigned measure_rdtsc_frequency(void)
+{
+    unsigned long long tscA, tscB;
+    unsigned long long y1, y2, offset;
+    unsigned ret, rdtsc_freq_measured;
+    static const int x1 = 128, x2 = 256; // ~ms
+
+    tscA = rdtsc();
+    ret = usleep(x1*1024);
+    tscB = rdtsc();
+    if (ret) {
+	printf("CPU frequency detection failed (sleep) Bailing out\n");
+	return 0;
+    }
+    y1 = tscB - tscA;
+    rdtsc_freq_measured = (unsigned)((y1*1000ull)/(x1*1024));
+    tscA = rdtsc();
+    ret = usleep(x2*1024);
+    tscB = rdtsc();
+    if (ret) {
+	printf("CPU frequency detection failed (sleep) Bailing out\n");
+	return 0;
+    }
+    y2 = tscB - tscA;
+    offset = ((y1*x2) - (y2*x1))/(x2-x1);
+    rdtsc_freq_measured = (unsigned)(((y1 - offset)*1000ull)/(x1*1024));
+//printf("rdtsc_freq_measured: %d, offset: %lld\n", rdtsc_freq_measured, offset);
+
+    return rdtsc_freq_measured;
+}
+
+#ifdef _WIN32
+/*
+   //Windows 'recommended' way of timestamping: 
+   LARGE_INTEGER frequency, perfCount;
+   QueryPerformanceFrequency(&frequency);
+   QueryPerformanceCounter(&perfCount);
+   start = perfCount.QuadPart;
+   Sleep(1000);
+   QueryPerformanceCounter(&perfCount);
+   end = perfCount.QuadPart;
+   elapsed = (double)(end - start) / frequency.QuadPart;
+  */
+unsigned get_cycle_freq(void)
+{
+    LARGE_INTEGER i;
+    unsigned rdtsc_khz;
+
+    /* Note on QueryPerformanceFrequency():
+     * This function will usually return TSC counter frequency.
+     * This is true on most modern x86 CPUs, and TSC counter frequency
+     * can be equated to 'sticker' CPU frequency as TSC counter
+     * frequency remains constant even though CPU frequency changes
+     * due to frequency scaling/turbo boost/throttling.
+     * 
+     * The point is that for our pmbench purpose we use rdtsc to measure
+     * wall clock time, so the TSC counter frequency returned by
+     * this function perfectly suits our needs. (we're not measuring
+     * CPU speed)
+     *
+     * N.B.: On systems lacking TSC counter, this function returns 
+     * low (a few MHZ) number, which doesn't reflect CPU frequency.
+     * (This is due to it reports frequncy of ACPI timer or even 8254 PIT)
+     */
+    if (!QueryPerformanceFrequency(&i)) {
+        printf("QueryPerformanceFrequency failed!\n");
+	return 0;
+    }
+    if (i.QuadPart < (1ll << 26)) { // should be greater than 64 MiHZ
+        printf("QueryPerformanceFrequency() - too small at %"PRIu64" HZ\n", i.QuadPart);
+	printf("Alternative: rdtsc-based:");
+	rdtsc_khz = measure_rdtsc_frequency();
+	printf("rdtsc frequency at %dKHZ\n", rdtsc_khz);
+	return rdtsc_khz;
+    } else {
+	return (unsigned)(i.QuadPart);   // perfFreq in Hz
+    }
+}
+#else
+unsigned get_cycle_freq(void)
+{
+    /* methodology 1: grep for 'cpu MHz' line in /proc/cpuinfo */
+    FILE* fp;
+    static char buf[512];
+    char* cursor;
+    float cpumhz;
+    unsigned cpu_freq_reported;
+    unsigned rdtsc_freq_measured;
+
+    fp = fopen("/proc/cpuinfo", "r");
+    if (!fp) {
+	perror("Can't open /proc/cpuinfo - Bailing out");
+	return 0;
+    }
+    fread(buf, 512, 1, fp);
+
+    cursor = strstr(buf, "cpu MHz");
+    cursor += 11; // consume "cpu MHz \t: "
+    sscanf(cursor, "%f", &cpumhz);
+    cpu_freq_reported = (unsigned)(cpumhz * 1000.0f);
+
+    if (cpu_freq_reported < 500000 || cpu_freq_reported > 5000000) {
+	printf("CPU frequency detection failed. Bailing out\n");
+	return 0;
+    }
+
+    rdtsc_freq_measured = measure_rdtsc_frequency();
+    if (!rdtsc_freq_measured) {
+	return cpu_freq_reported;
+    }
+    if (abs(cpu_freq_reported - rdtsc_freq_measured) / 1000 < 100 ) { // tolerance: 100Mhz
+	return cpu_freq_reported;
+    } else {
+	return rdtsc_freq_measured;
+    }
+}
+#endif
+
+static
+_code
+unsigned long long _ops_rdtsc(void) 
+{
+    return rdtsc();
+}
+
+/*
+ * returns 0 upon success, non zero upon failure
+ */
+int _ops_rdtsc_init_base_freq(struct sys_timestamp* sts)
+{
+    unsigned freq_khz = measure_rdtsc_frequency();
+    if (!freq_khz) return -1;
+    sts->base_freq_khz = freq_khz;
+    return 0;
+}
+
+/* timestamp measure based on rdtsc */
+struct sys_timestamp rdtsc_ops = {
+    .timestamp = _ops_rdtsc,
+    .init_base_freq = _ops_rdtsc_init_base_freq,
+    .base_freq_khz = 0,
+    .name = "rdtsc",
+};
+
+static
+_code
+unsigned long long _ops_rdtscp(void)
+{
+    return rdtscp();
+}
+
+/*
+ * returns 0 upon success, non zero upon failure
+ */
+int _ops_rdtscp_init_base_freq(struct sys_timestamp* sts)
+{
+    unsigned freq_khz = measure_rdtsc_frequency();
+    if (!freq_khz) return -1;
+    sts->base_freq_khz = freq_khz;
+    return 0;
+}
+
+/* timestamp measure based on rdtscp */
+struct sys_timestamp rdtscp_ops = {
+    .timestamp = _ops_rdtscp,
+    .init_base_freq = _ops_rdtsc_init_base_freq,
+    .base_freq_khz = 0,
+    .name = "rdtscp",
+};
+
+#ifdef _WIN32
+unsigned long long _ops_perfc(void)
+{
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    return counter.QuadPart << 10;
+}
+
+int _ops_perfc_init_base_freq(struct sys_timestamp* sts)
+{
+    LARGE_INTEGER frequency;
+    if (!QueryPerformanceFrequency(&frequency)) return -1;
+    sts->base_freq_khz = frequency.QuadPart;
+    return 0;
+}
+
+/* timestamp measure based on QueryPerformance call */ 
+struct sys_timestamp perfc_ops = {
+    .timestamp = _ops_perfc,
+    .init_base_freq = _ops_perfc_init_base_freq,
+    .base_freq_khz = 0,
+    .name = "perfc",
+};
+#else 
+// XXX for now perfc_ops is identical to rdtsc_ops
+struct sys_timestamp perfc_ops = {
+    .timestamp = _ops_rdtsc,
+    .init_base_freq = _ops_rdtsc_init_base_freq,
+    .base_freq_khz = 0,
+    .name = "perfc",
+};
+#endif
+
+static struct sys_timestamp* all_sys_timestamp[] = {
+    &rdtsc_ops, &rdtscp_ops, &perfc_ops, 0
+};
+
+struct sys_timestamp* get_timestamp_from_name(const char* str)
+{
+    int i = 0;
+    if (!str) return 0;
+    while (all_sys_timestamp[i]) {
+	if (!my_strncmp(all_sys_timestamp[i]->name, str, 16))
+	    return all_sys_timestamp[i];
+	i++;
+    }
+    return 0;
+}
+
+/*
+ * return non-zero upon error
+ */
+#ifdef _WIN32
+int sys_stat_mem_init(sys_mem_ctx* ctx)
+{
+    return 0;
+}
+
+/*
+ * sys_stat_mem_update()
+ * get system memory stat update
+ */
+int sys_stat_mem_update(sys_mem_ctx* ctx, sys_mem_item* info)
+{
+    info->memstatex.dwLength = sizeof(info->memstatex);
+
+    GlobalMemoryStatusEx(&info->memstatex);
+    
+    info->recorded = 1;
+    return 0;
+}
+
+/*
+ *  clean up memory stat metainfo
+ */
+int sys_stat_mem_exit(sys_mem_ctx* ctx)
+{
+    return 0;
+}
+
+void
+__attribute__((cold))
+sys_stat_mem_print_header(void)
+{
+    printf("            free(K) in_use(%%) pgfile(K) avail_pgfile(K) avail_virt(K)\n");
+}
+void
+__attribute__((cold))
+sys_stat_mem_print(const sys_mem_item* info)
+{
+    const MEMORYSTATUSEX* stat = &info->memstatex;
+
+    printf("%8"PRIu64" %8"PRId32" %10"PRIu64" %13"PRIu64" %12"PRIu64"\n",
+	    stat->ullAvailPhys/1000, (int)stat->dwMemoryLoad, 
+	    stat->ullTotalPageFile/1000, stat->ullAvailPageFile/1000,
+            stat->ullAvailVirtual/1000); 
+}
+
+void 
+__attribute__((cold))
+sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* after)
+{
+    const MEMORYSTATUSEX* stat_b = &before->memstatex;
+    const MEMORYSTATUSEX* stat_a = &after->memstatex;
+
+    printf("%8"PRId64" %8"PRId32" %10"PRId64" %13"PRId64" %12"PRId64"\n",
+	    (long long)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000, 
+	    (int)(stat_a->dwMemoryLoad - stat_b->dwMemoryLoad), 
+	    (long long)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000, 
+	    (long long)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000, 
+            (long long)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000); 
+}
+#else
+int sys_stat_mem_init(sys_mem_ctx* ctx)
+{
+    int r1, r2;
+
+    r1 = open("/proc/meminfo", O_RDONLY);
+    r2 = open("/proc/vmstat", O_RDONLY);
+
+    if (r1 == -1 || r2 == -1) {
+	if (r1 != -1) close(r1);
+	if (r2 != -1) close(r2);
+	fprintf(stderr, "%s: failed to open proc entry\n", __func__);
+	return -1;
+    }
+    ctx->fd_meminfo = r1;
+    ctx->fd_vmstat = r2;
+    
+    return 0;
+}
+
+/*
+ * returns parsed out integer value from a meminfo line
+ * @buf points to the start of the 28-byte lengh meminfo line
+ */
+static inline
+int meminfo_get_line(const char* buf) {
+    const char* pos = strchr(buf, ':');
+    return atoi(pos + 1);
+}
+
+int sys_stat_mem_update(sys_mem_ctx* ctx, sys_mem_item* info)
+{
+#define BUF_SIZE 2048
+    static const int linelen = 28; // meminfo line length
+
+    static char buf_meminfo[BUF_SIZE];
+    static char buf_vmstat[BUF_SIZE];
+    char* pos;
+    int n;
+
+    n = pread(ctx->fd_meminfo, buf_meminfo, BUF_SIZE, 0);
+    if (n == -1) return -1;
+    n = pread(ctx->fd_vmstat, buf_vmstat, BUF_SIZE, 0);
+    if (n == -1) return -1;
+    
+    // meminfo
+    pos = buf_meminfo;
+    info->total_kib = meminfo_get_line(pos); pos += linelen;
+    info->free_kib = meminfo_get_line(pos); pos += linelen;
+    info->buffer_kib = meminfo_get_line(pos); pos += linelen;
+    info->cache_kib = meminfo_get_line(pos); pos += 2*linelen;
+    info->active_kib = meminfo_get_line(pos); pos += linelen;
+    info->inactive_kib = meminfo_get_line(pos);
+
+    // vmstat
+    pos = strstr(buf_vmstat, "pgpgin");
+    info->pgpgin = atoll(pos + 7);
+    pos = strchr(pos + 7, '\n') + 1;
+    info->pgpgout = atoll(pos + 8);
+    pos = strchr(pos + 8, '\n') + 1;
+    info->pswpin = atoll(pos + 7);
+    pos = strchr(pos + 7, '\n') + 1;
+    info->pswpout = atoll(pos + 8);
+    pos = strstr(pos + 8, "pgmajfault");
+    info->pgmajfault = atoll(pos + 11);
+    
+    info->recorded = 1;
+    return 0;
+#undef BUF_SIZE
+}
+
+int sys_stat_mem_exit(sys_mem_ctx* ctx)
+{
+    close(ctx->fd_meminfo);
+    close(ctx->fd_vmstat);
+    return 0;
+}
+
+void sys_stat_mem_print_header(void)
+{
+    printf("            free(K) buffer(K) cache(K) active(K) inactv(K)"
+	   " pgpgin   pgpgout    pswpin   pswpout pgmajfaut\n");
+}
+
+void sys_stat_mem_print(const sys_mem_item* info)
+{
+    printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
+		    info->free_kib, info->buffer_kib,
+		    info->cache_kib, info->active_kib, info->inactive_kib,
+		    info->pgpgin, info->pgpgout, info->pswpin,
+		    info->pswpout, info->pgmajfault);
+}
+
+void sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* after)
+{
+    printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
+		    after->free_kib - before->free_kib, after->buffer_kib - before->buffer_kib,
+		    after->cache_kib - before->cache_kib, after->active_kib - before->cache_kib, 
+		    after->inactive_kib - before->inactive_kib,
+		    after->pgpgin - before->pgpgin, after->pgpgout -  before->pgpgout, 
+		    after->pswpin - before->pswpin,
+		    after->pswpout - before->pswpout, after->pgmajfault - before->pgmajfault);
+}
+
+#endif
+
+
+void sys_print_pmbench_info(void)
+{
+    printf("pmbench version: %s\n", argp_program_version);
+}
+
+
+#ifdef _WIN32
+#define NAME_BUF_SIZE 64 
+void sys_print_os_info(void)
+{
+    TCHAR infBuf[NAME_BUF_SIZE];
+    DWORD bufCharCount = NAME_BUF_SIZE;
+    DWORD version; 
+    int maj, min, build = 0;
+    SYSTEM_INFO sysinfo;
+    const char* proc_arch = "unknown";
+    
+    if (!GetComputerName(infBuf, &bufCharCount)) {
+	printf("Hostname unkwnown.\n");
+	goto version_info;
+    }
+    printf("Hostname       : %s\n", infBuf);
+
+version_info:
+    version = GetVersion();
+    maj = (int)(LOBYTE(LOWORD(version)));
+    min = (int)(HIBYTE(LOWORD(version)));
+    if (version < 0x80000000) {
+	build = (int)(HIWORD(version));
+    }
+
+    GetNativeSystemInfo(&sysinfo);
+    switch (sysinfo.wProcessorArchitecture) {
+    case 9:
+	proc_arch = "x64";
+	break;
+    case 6:
+	proc_arch = "Itanium";
+	break;
+    case 0:
+	proc_arch = "x86";
+	break;
+    }
+
+    printf("OS/kernel type : Windows %s version %d.%d (build %d)\n", 
+	    proc_arch, maj, min, build);
+    return;
+}
+
+#ifndef LOCALE_INVARIANT
+#define LOCALE_INVARIANT 0x007f
+#endif
+void sys_print_time_info(void)
+{
+    int ret;
+    char time_strbuf[64];
+    char date_strbuf[64];
+    char year_strbuf[8];
+    SYSTEMTIME systime;
+
+    GetLocalTime(&systime);
+
+    ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, 
+	    "ddd MMM dd", date_strbuf, 64);
+    if (!ret) {
+	printf("date/time failed\n");
+	return;
+    }
+    ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, 
+	    "yyyy", year_strbuf, 8);
+    if (!ret) {
+	printf("date/time failed\n");
+	return;
+    }
+    ret = GetTimeFormat(LOCALE_INVARIANT, TIME_FORCE24HOURFORMAT, &systime, 
+	    NULL, time_strbuf, 64);
+    if (!ret) {
+	printf("date/time failed\n");
+	return;
+    }
+    printf("Reported on    : %s %s %s\n", date_strbuf, time_strbuf, year_strbuf);
+    return;
+}
+
+void sys_print_uuid(void)
+{
+    unsigned char* rpc_str;
+    UUID uu;
+    RPC_STATUS rpc_ret;
+    
+    
+    rpc_ret = UuidCreate(&uu);
+    rpc_ret = UuidToString(&uu, &rpc_str);
+    if (rpc_ret != RPC_S_OK) {
+	printf("Benchmark UUID : failed to generate UUID\n");
+	return;
+    }
+    
+    printf("Benchmark UUID : %s\n", rpc_str);
+    RpcStringFree(&rpc_str);
+}
+
+#else
+
+void sys_print_os_info(void)
+{
+    int ret;
+    struct utsname uname_buf;
+    ret = uname(&uname_buf);
+    if (ret) {
+	perror("uname() failed");
+	printf("Hostname unknown.\n");
+	return;
+    }
+    printf("Hostname       : %s\n", uname_buf.nodename);
+    printf("OS/kernel type : %s %s %s\n", uname_buf.sysname, uname_buf.release, uname_buf.machine);
+}
+
+void sys_print_time_info(void)
+{
+    time_t t;
+    char strbuf[64];
+    char *timestr;
+    
+    t = time(NULL);
+    if (t == ((time_t) -1)) {
+	perror("time() failed");
+	return;
+    }
+    timestr = ctime_r(&t, strbuf);
+    printf("Reported on    : %s", timestr);  /* N.B. ctime addes \n at the end */
+}
+
+void sys_print_uuid(void)
+{
+    char str[37]; /* 36-byte string plus null */
+    uuid_t uu;
+
+    uuid_generate(uu);
+    uuid_unparse(uu, str);
+    printf("Benchmark UUID : %s\n", str);
+}
+#endif

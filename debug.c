@@ -26,9 +26,8 @@
    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
    POSSIBILITY OF SUCH DAMAGE.
  */
-/*
- * Written by: Jisoo Yang <jisoo.yang@intel.com>
- */
+
+/* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 /*
  * this file contains debug/test code which is only compiled in when testing

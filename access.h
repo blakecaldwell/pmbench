@@ -29,9 +29,7 @@
    POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * Written by Jisoo Yang <jisoo.yang@intel.com> 
- */
+/* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 typedef struct access_fn_set {
     int (*warmup)(char* buf, size_t pfn);		// callback for warmup touch

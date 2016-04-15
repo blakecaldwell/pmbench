@@ -27,9 +27,7 @@
    POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * Written by: Jisoo Yang <jisoo.yang@intel.com> 
- */
+/* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -64,7 +62,6 @@ void atomic_dec(unsigned* pval) {
 /** 
  * NB. Using function pointer to 1) choose method easily and 2) avoid
  * possible compiler optimization around the function call.
- * Note: probably better writing in asm?
  */
 
 /*

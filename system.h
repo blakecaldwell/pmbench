@@ -28,9 +28,8 @@
    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
    POSSIBILITY OF SUCH DAMAGE.
  */
-/*
- * Author contact: Jisoo Yang <jisoo.yang@intel.com> 
- */
+
+/* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 #ifdef _WIN32
 
@@ -99,6 +98,27 @@ static inline int __my_flsl(unsigned x)
 
 static inline int ilog2(unsigned x) {
     return __my_flsl(x) - 1;
+}
+
+static inline void __pause(void) {
+    asm volatile ( "pause\n" );
+}
+
+/*
+ * returns 0 if it didn't have to enter pause loop
+ * otherwise returns number of pause loop iterations
+ */
+static inline
+unsigned long long sys_delay(int min_clk)
+{
+    unsigned long long count = 0;
+    unsigned long long past = rdtsc();
+
+    while (1) {
+	if ((rdtsc() - past) > min_clk) return count;
+	count++;
+	__pause();
+    }
 }
 
 extern int is_rdtscp_available(void);

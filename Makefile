@@ -51,8 +51,8 @@ endif
 
 #LFLAGS_LINUX += -Wl,--section-start=.pmbench_code_page=408000
 # uncomment below to compile-in multi-threaded benchmark
-CFLAGS_LINUX += -DPMB_THREAD=1 -pthread
-LFLAGS_LINUX += -pthread 
+#CFLAGS_LINUX += -DPMB_THREAD=1 -pthread
+#LFLAGS_LINUX += -pthread 
 # uncomment below to add XALLOC
 #CFLAGS_LINUX += -DXALLOC -I../xalloc
 #LFLAGS_LINUX += ../xalloc/libxalloc.a
@@ -64,8 +64,8 @@ LIBPATH_WINARGP := ../argpwin
 CFLAGS_WIN := -D_WIN32_WINNT=0x0501 -I$(INCPATH_WINARGP)
 LFLAGS_WIN := -lrpcrt4  -L$(LIBPATH_WINARGP)
 # uncomment below to compile-in multi-threaded benchmark
-CFLAGS_WIN += -DPMB_THREAD=1 -lpthread
-LFLAGS_WIN += -lpthread
+#CFLAGS_WIN += -DPMB_THREAD=1 -lpthread
+#LFLAGS_WIN += -lpthread
 # uncomment below to add XALLOC
 #CFLAGS_WIN += -DXALLOC -I../xalloc
 #LFLAGS_WIN += ../xalloc/xalloc.dll 

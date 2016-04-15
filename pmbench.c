@@ -27,12 +27,13 @@
    POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*  Writen by: Jisoo Yang <jisoo.yang@intel.com>  */
+/* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 #define _GNU_SOURCE
 #include <memory.h>
 
 #include <stdlib.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <signal.h>
 #include <string.h>
@@ -54,8 +55,6 @@
 #endif
 
 #ifdef PMB_THREAD
-#include <sys/stat.h>
-#include <semaphore.h>
 #include <pthread.h>
 #endif
 
@@ -102,6 +101,7 @@ static struct argp_option options[] = {
     { "access", 'a', "ACCESS", 0, "Specify access method. e.g., touch, histo" },
     { "pattern", 'p', "PATTERN", 0, "Specify PATTERN. e.g, linear, uniform(def), pareto, normal" },
     { "shape", 'e', "SHAPE", 0, "Pattern-specific parameter" },
+    { "delay", 'd', "DELAY", 0, "Delay between accesses in clock cycles" },
     { "quiet", 'q', 0, 0, "Don't produce any output until finish" },
     { "cold", 'c', 0, OPTION_ARG_OPTIONAL, "Don't perform warm-up exercise" },
     { "timestamp", 't', "TIMESTAMP", 0, "Specify TIMESTAMP. rdtsc(def), rdtscp, or perfc" },
@@ -127,6 +127,7 @@ typedef struct parameters {
     access_fn_set* access;  // access method (touch or histo)
     pattern_generator* pattern;	// benchmark pattern
     double shape;	    // 'shape' parameter to use for pattern
+    int delay;		    // minimum clock cycles between accesses
     int quiet;		    // no output until done
     int cold;		    // don't perform warm up exercise before benchmark
     struct sys_timestamp* tsops; // timestamp ops (rdtsc_ops or perfc_ops)
@@ -147,6 +148,7 @@ void set_default_params(parameters* p)
     p->access = &histogram_access;
     p->pattern = &uniform_pattern;
     p->shape = 1.00001;
+    p->delay = 0;	    // no delay
     p->quiet = 0;
     p->cold = 0;
     p->tsops = &rdtsc_ops;
@@ -168,6 +170,7 @@ void print_params(const parameters* p)
     printf("  mapsize_mib  = %d\n", p->mapsize_mib);
     printf("  setsize_mib  = %d\n", p->setsize_mib);
     printf("  shape        = %f\n", p->shape);
+    printf("  delay        = %d\n", p->delay);
     printf("  quiet        = %d\n", p->quiet);
     printf("  cold         = %d\n", p->cold);
     printf("  jobs         = %d\n", p->jobs);
@@ -229,6 +232,9 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
 	    return ARGP_ERR_UNKNOWN;
 	}
 	break;
+    case 'd':
+	if (arg) param->delay = atoi(arg);
+	break;
 #ifdef XALLOC
     case 'x':
 	if (arg) param->xalloc_mib = atoi(arg);
@@ -273,14 +279,14 @@ static
 __attribute__((cold))
 int params_parsing(int argc, char** argv)
 {
-    static const char program_doc_str[] = "pmbench - System Paging/Swapping/Memory Benchmark";
+    static const char program_doc_str[] = "pmbench - System paging/swapping/memory benchmark";
     static const char args_doc_str[] = "DURATION";
 
     static struct argp argp = { options, parse_opt, args_doc_str, program_doc_str };
     /* N.B. to deal with Windows dll linkage issue, we set these variables here
      * instead of statical assignment */
-    argp_program_version = "pmbench 0.7" COMPILE_OPT_TAGS;
-    argp_program_bug_address = "Jisoo Yang <jisoo.yang@intel.com>";
+    argp_program_version = "pmbench 0.8" COMPILE_OPT_TAGS;
+    argp_program_bug_address = "Jisoo Yang <jisoo.yang@unlv.edu>";
 
     argp_parse(&argp, argc, argv, 0, 0, &params);
 
@@ -306,7 +312,13 @@ int params_parsing(int argc, char** argv)
  */
 #ifdef PMB_THREAD
 pthread_mutex_t lock_prn = PTHREAD_MUTEX_INITIALIZER;
+#define prn_lock() pthread_mutex_lock(&lock_prn)
+#define prn_unlock() pthread_mutex_unlock(&lock_prn)
+#else
+#define prn_lock(_l_) do {;} while(0)
+#define prn_unlock(_l_) do {;} while(0)
 #endif
+
 static inline
 int prn(const char* format, ...)
 {
@@ -315,15 +327,11 @@ int prn(const char* format, ...)
 
     if (params.quiet) return 0;
 
-#ifdef PMB_THREAD
-    pthread_mutex_lock(&lock_prn);
-#endif
+    prn_lock();
     va_start(ap, format);
     len = vprintf(format, ap);
     va_end(ap);
-#ifdef PMB_THREAD
-    pthread_mutex_unlock(&lock_prn);
-#endif
+    prn_unlock();
 
     return len;
 }
@@ -360,67 +368,36 @@ int us_to_clk(float us) {
     return (int)(us * freq_khz / 1000);
 }
 
-/* this is for single thread version */
-static struct bench_result result;
-
-static
-void reset_result(struct bench_result* presult)
-{
+static inline
+void reset_result(struct bench_result* presult) {
     memset(presult, 0, sizeof(*presult));
 }
 
-#ifdef PMB_THREAD
-/* 
- * Barrier (pthread_barrier_wait()) or semaphore may be more convenient.
- * we just stick to using condition variable here for win32 port sanity..
- */
-
 /* per thread info */
 struct thread_info {
+#ifdef PMB_THREAD
     pthread_t thread_id;	    // returned by pthread_create
-    int thread_num;		    // local thread sequence number (1, 2, 3,...)
-    pthread_mutex_t lock_gate;	    // control warmup finish
+#endif
+    int thread_num;		    // local thread number (1, 2, 3,...)
     struct bench_result result;	    // per-thread result
 };
 
 /* thread-shared for concurrency control and shared variable access */
 struct thread_control {
     struct thread_info* tinfo;	    // thread info array created
-    int num_warmup;		    // protected by lock_warmup
-//    pthread_barrier_t barr_warmup;  // 
-    pthread_mutex_t lock_warmup;    // 
-    pthread_cond_t cond_warmup_done;// 
     char* buf;			    // memory map base pointer for access
     int interrupted;		    // ctrl-c sets this
-} control;
-
-static inline
-struct bench_result* get_per_thread_result(int i) {
-    if (params.jobs == 1) return &result;
-    else return &control.tinfo[i].result;
-}
-#else
-struct thread_info {
-    int thread_num;
-};
-
-struct thread_control {
-    char* buf;
-    int interrupted;
-} control;
-
-static inline
-struct bench_result* get_per_thread_result(int i) {
-    return &result;
-}
+#ifdef PMB_THREAD
+    pthread_barrier_t barrier;	    // barrier for mt
 #endif
+} control;
 
 static
 void print_result(void)
 {
     int i;
     for (i = 0; i < params.jobs; i++) {
-	struct bench_result* presult = get_per_thread_result(i);
+	struct bench_result* presult = &control.tinfo[i].result;
 	float pure_lat = mean_us(bench) - mean_us(numgen);
 	printf("Thread %d/%d:\n", i+1, params.jobs);
 	printf("Net average page latency (Arith. mean): %0.4f us (%d clks)\n",
@@ -590,34 +567,16 @@ void mem_info_oneshot(uint64_t now, void* param)
 
 static void* main_bm_thread(void* arg);
 
-extern void perform_benchmark_st(char* buf) _code;
-void
-perform_benchmark_st(char* buf) 
-{
-    struct thread_info info_single = {
-	.thread_num = 1,
-    };
-    control.buf = buf;
-    main_bm_thread((void*)&info_single);
-    params.access->finish(buf, params.setsize_mib * 256);
-}
 
+#define TS_WARMUP_DONE (1)
+#define TS_MAIN_BM_START (2)
+static inline
+void thread_sync(int syncpoint) {
 #ifdef PMB_THREAD
-static
-void 
-_code
-thread_sync_warmup(struct thread_info* tinfo)
-{
-    pthread_mutex_lock(&control.lock_warmup);
-    control.num_warmup--;
-    pthread_mutex_unlock(&control.lock_warmup);
-    pthread_cond_signal(&control.cond_warmup_done);
-
-    pthread_mutex_lock(&tinfo->lock_gate);
-}
-#else
-#define thread_sync_warmup(_p_) do {;} while(0)
+    pthread_barrier_wait(&control.barrier);
 #endif
+    return;
+}
 
 /**
  * - main benchmark entry point  
@@ -637,11 +596,7 @@ void* main_bm_thread(void* arg)
 
     char* buf = control.buf;
 
-#ifdef PMB_THREAD
-    struct bench_result* presult = (params.jobs == 1) ? &result: &tinfo->result;
-#else
-    struct bench_result* presult = &result;
-#endif
+    struct bench_result* presult = &tinfo->result;
 
     const parameters* p = &params;
     pattern_generator* pattern = p->pattern;
@@ -663,8 +618,6 @@ void* main_bm_thread(void* arg)
     size_t iter_warmup;
     int iter_patternlap = 1000000; // draw 1000000
     void* ctx = pattern->alloc_pattern(num_pages, p->shape, tinfo->thread_num);
-
-    prn("[%d] Thread created\n", tinfo->thread_num);
 
     prn("[%d] num_pages: %ld (%ld MiB), shape: %0.4f\n", tinfo->thread_num,
 	    num_pages, num_pages/256, p->shape);
@@ -711,11 +664,11 @@ void* main_bm_thread(void* arg)
     }
 
 out_warmup_interrupted:
-
-    thread_sync_warmup(tinfo);
+    thread_sync(TS_WARMUP_DONE);
+    /* main thread collects warmup stats between the two sync points */
+    thread_sync(TS_MAIN_BM_START);
     prn("[%d] Starting main benchmark\n", tinfo->thread_num);
 
-    /* do benchmark */
     tenk = 0;
 
     done_tsc = (uint64_t)p->duration_sec * freq_khz * 1000; 
@@ -726,6 +679,7 @@ out_warmup_interrupted:
 	alarm_check(now);
 	for (i = 0; i < 10000; ++i) {
 	    access->exercise(buf, pattern->get_next(ctx));
+	    if (p->delay > 10) sys_delay(p->delay);
 	}
 	tenk++;
 	if (control.interrupted) break;
@@ -747,7 +701,6 @@ out_warmup_interrupted:
     return NULL;
 }
 
-#ifdef PMB_THREAD
 
 #define handle_error_en(en, msg) \
     do { errno = en; perror(msg); exit(EXIT_FAILURE); } while (0)
@@ -755,6 +708,13 @@ out_warmup_interrupted:
 #define handle_error(msg) \
     do { perror(msg); exit(EXIT_FAILURE); } while (0)
 
+#ifdef PMB_THREAD
+/*
+ * For multi-threaded bm, we have 1 control thread and n worker threads.
+ * The control thread (perform_benchmark_mt) does not participate in 
+ * measurement - it just corrodinate start/finish of worker threads.
+ * Worker threads execute main_bm_thread() to perform actual work.
+ */
 void perform_benchmark_mt(char* buf) _code;
 void 
 //__attribute__((aligned(4096)))
@@ -767,9 +727,7 @@ perform_benchmark_mt(char* buf)
     pthread_attr_t attr;
     void *res;
 
-    control.num_warmup = num_threads;
-    pthread_mutex_init(&control.lock_warmup, NULL);
-    pthread_cond_init(&control.cond_warmup_done, NULL);
+    pthread_barrier_init(&control.barrier, NULL, num_threads + 1);
     control.buf = buf;
 
     s = pthread_attr_init(&attr);
@@ -785,9 +743,7 @@ perform_benchmark_mt(char* buf)
 
     for (i = 0; i < num_threads; i++) {
 	tinfo[i].thread_num = i + 1;
-	pthread_mutex_init(&tinfo[i].lock_gate, NULL);
 	reset_result(&tinfo[i].result);
-	pthread_mutex_lock(&tinfo[i].lock_gate);
 
 	s = pthread_create(&tinfo[i].thread_id, &attr,
 		&main_bm_thread, &tinfo[i]);
@@ -797,11 +753,7 @@ perform_benchmark_mt(char* buf)
     if (s != 0) handle_error_en(s, "pthread_attr_destroy");
 
     /* gate control for warmup finish */
-    pthread_mutex_lock(&control.lock_warmup);
-    while (control.num_warmup > 0) {
-	pthread_cond_wait(&control.cond_warmup_done, &control.lock_warmup);
-    }
-    pthread_mutex_unlock(&control.lock_warmup);
+    thread_sync(TS_WARMUP_DONE);
 
     /* check again for ctrl-c interruption */
     if (control.interrupted) {
@@ -810,10 +762,8 @@ perform_benchmark_mt(char* buf)
 	exit(EXIT_FAILURE);
     }
      
-    /* release the hounds */
-    for (i = 0; i < num_threads; i++) {
-	pthread_mutex_unlock(&tinfo[i].lock_gate);
-    }
+    // release the hounds - synchronize all threadsto start main bm 
+    thread_sync(TS_MAIN_BM_START);
 
     /* join workers to finish */
     for (i = 0; i < num_threads; i++) {
@@ -828,8 +778,26 @@ perform_benchmark_mt(char* buf)
 
     params.access->finish(buf, params.setsize_mib * 256);
 }
-#endif
+#else 
+extern void perform_benchmark_st(char* buf) _code;
+void
+perform_benchmark_st(char* buf) 
+{
+    struct thread_info* tinfo;
 
+    tinfo = calloc(1, sizeof(struct thread_info));
+    if (tinfo == NULL) exit(EXIT_FAILURE);
+    tinfo->thread_num = 1;
+    reset_result(&tinfo->result);
+
+    control.tinfo = tinfo;
+    control.buf = buf;
+    control.interrupted = 0;
+
+    main_bm_thread((void*)tinfo);
+    params.access->finish(buf, params.setsize_mib * 256);
+}
+#endif
 
 static
 void conclude_benchmark_early(void)
@@ -968,14 +936,7 @@ int main(int argc, char** argv)
     
     params_parsing(argc, argv);
 
-    reset_result(&result);
-
-    /*
-     * Want to aviod dropping a huge core file when pmbench crashes.
-     * Comment out below if pmbench needs debugging.
-     */
     disable_core_dump(); 
-    //buf = (char*)((1ull); buf[0]= 1;// force crash
     
     if (!is_tsc_invariant()) {
 	prn("WARNING: CPU do not support constant-rate rdtsc. Results obtained via rdtsc(p) may be inaccurate!\n");
@@ -985,6 +946,22 @@ int main(int argc, char** argv)
 	params.tsops = &rdtsc_ops;
     }
     
+#ifdef WIN32
+    {
+	SYSTEM_INFO sysinfo;
+	GetNativeSystemInfo(&sysinfo);
+	if (sysinfo.dwPageSize != 4096) {
+	    prn("ERROR: system page size is not 4K.\n");
+	    return 1;
+	}
+    }
+#else
+    if (sysconf(_SC_PAGESIZE) != 4096) {
+	prn("ERROR: system page size is not 4K.\n");
+	return 1;
+    }
+#endif
+
     rdtsc_ops.init_base_freq(&rdtsc_ops);
     rdtscp_ops.init_base_freq(&rdtscp_ops);
     perfc_ops.init_base_freq(&perfc_ops);
@@ -1076,13 +1053,11 @@ int main(int argc, char** argv)
 
 #ifdef PMB_THREAD
     perform_benchmark_mt(buf);
-    print_report(buf, &params);
-    free(control.tinfo);
 #else
     perform_benchmark_st(buf);
-    print_report(buf, &params);
 #endif
-
+    print_report(buf, &params);
+    free(control.tinfo);
 
 #ifdef _WIN32
 #ifdef XALLOC

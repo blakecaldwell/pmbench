@@ -28,9 +28,8 @@
    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
    POSSIBILITY OF SUCH DAMAGE.
  */
-/*
- * Written by: Jisoo Yang <jisoo.yang@intel.com> 
- */
+
+/* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 //#define USE_LONG_DOUBLE 1
 #ifdef USE_LONG_DOUBLE

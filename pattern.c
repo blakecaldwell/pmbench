@@ -54,7 +54,7 @@
 
 static inline
 long int sys_random(void) {
-    return rand();
+	return rand();
 }
 
 /* 
@@ -80,12 +80,12 @@ struct sys_random_state {
 
 static inline
 void sys_random_init(struct sys_random_state* s, unsigned int seed) {
-    s->dkstate = (uint64_t)seed;
+	s->dkstate = (uint64_t)seed;
 }
 
 static inline
 long int sys_random_r(struct sys_random_state* s) {
-    return (long int)dk_random_next(&s->dkstate);
+	return (long int)dk_random_next(&s->dkstate);
 }
 
 /*
@@ -165,8 +165,8 @@ void* uniform_alloc_pattern_fn(long size, fp_t dummy1, unsigned int random_seed)
 {
     uniform_context* ctx = malloc(sizeof(uniform_context));
     if (!ctx) return NULL;
-    sys_random_init(&ctx->rstate, random_seed + 2);  // 2 is just a random number
 
+    sys_random_init(&ctx->rstate, random_seed + 2);  // 2 is just a random number
     ctx->n = size;
     return ctx;
 }
@@ -180,7 +180,7 @@ long uniform_get_number(void* ctx_)
 }
 
 /*
- * We somewhat arbitrarilly use 4*n as the the warm-up period.
+ * We somewhat arbitrarily use 4*n as the the warm-up period.
  * (Although not every pages, 4*n trials will touch significantly 
  * large amount of pages)
  */
@@ -232,7 +232,7 @@ extern pattern_generator uniform_pattern;
 typedef struct normal_ih_context {
     struct sys_random_state rstate;
     long n;	 // calculated n (must be 12*stdev)
-    long stdev;	 // calculatd stdev 
+    long stdev;	 // calculated stdev
     int shift;   // calculated shift (n_user - n)
     long n_user; // support [0, n_user]
 } normal_ih_context;
@@ -326,7 +326,6 @@ void* normal_alloc_pattern_fn(long size, fp_t param1, unsigned int random_seed)
     normal_context* ctx = malloc(sizeof(normal_context));
     if (!ctx) return NULL;
     sys_random_init(&ctx->rstate, random_seed + 5);
-
     ctx->n = size;
     ctx->stdev = (int)param1;
     ctx->save = -1;
@@ -443,7 +442,7 @@ long pareto_get_number(void* ctx_)
 }
 
 /*
- * we use n * 8 (arbitrarilly chosen).
+ * we use n * 8 (arbitrarily chosen).
  */
 static
 long pareto_get_warmup_run(void* ctx_)
@@ -476,8 +475,8 @@ pattern_generator zipf_pattern = {
  * all patterns
  */
 static pattern_generator* all_pattern[] = {
-    &linear_pattern, &uniform_pattern, &normal_pattern, &normal_ih_pattern,
-    &pareto_pattern, &zipf_pattern, 0
+		&linear_pattern, &uniform_pattern, &normal_pattern, &normal_ih_pattern,
+		&pareto_pattern, &zipf_pattern, 0
 };
 
 pattern_generator* get_pattern_from_name(const char* str)

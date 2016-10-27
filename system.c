@@ -265,65 +265,96 @@ int __cpuid_deterministic_cache_info(struct cpu_cache_info* output, int size)
 
 
 /*****************************************************/
-
-void print_tlb_info(void)
+unsigned char tlb_info_buf[16];
+int print_tlb_info()
 {
-    unsigned char buf[16];
-    int i, len;
-    
-    len = __cpuid_cache_tlb_info(buf);
-    for (i = 0; i < len; i++) {
-	switch (buf[i]) {
-	    CPUID02_TLB_PRN();
-	default:
-	    break;
+   int i, tlb_info_buf_len = __cpuid_cache_tlb_info(tlb_info_buf);
+   for (i = 0; i < tlb_info_buf_len; i++)
+	{
+		switch (tlb_info_buf[i])
+		{
+	    	CPUID02_TLB_PRN();
+			default: break;
+		}
 	}
+	return tlb_info_buf_len;
+}
+unsigned char get_tlb_info(int i) { return tlb_info_buf[i]; } //also need something for the switch statement
+
+struct cpu_cache_info cash[8];
+int print_cache_info(int len)
+{
+	unsigned capacity;
+   int i, deterministic = 0;
+   
+   //len = __cpuid_cache_tlb_info(buf);
+   for (i = 0; i < len; i++) 
+   {
+		switch (tlb_info_buf[i]) 
+		{
+			//if (xml) { printf("\t\t\t\t<cache_info_buf index=\"%d\">0x%02x</cache_info_buf>\n", i, buf[i]); }
+			CPUID02_CACHE_PRN();
+			case 0xFF:
+	    		deterministic = 1;
+	    		break;
+			default: break;
+		}
+	}
+   if (!deterministic) return 0;
+
+   memset(cash, 0, sizeof(cash));
+   len = __cpuid_deterministic_cache_info(cash, 8);
+   for (i = 0; i < len; i++)
+   {
+   	switch (cash[i].cachetype)
+   	{
+			case DATACACHE:
+				printf("DCACHE:");
+				break;
+			case INSTCACHE:
+				printf("ICACHE:");
+				break;
+			case UNICACHE:
+				printf("CACHE:");
+				break;
+			default:
+				break;
+		}
+		printf(" lvl %d, ", cash[i].level);
+		capacity = cash[i].sets * cash[i].linesize * cash[i].partitions * cash[i].ways;
+		printf("%d KB, ", capacity >> 10);
+		printf("sets:%d, linesz:%d, part:%d, ways:%d\n", cash[i].sets, cash[i].linesize, cash[i].partitions, cash[i].ways);
     }
+    return len;
 }
 
-void print_cache_info(void)
+char * get_cache_type(int i)
 {
-    unsigned char buf[16];
-    struct cpu_cache_info cash[8];
-    unsigned capacity;
-    int i, len, deterministic = 0;
-    
-    len = __cpuid_cache_tlb_info(buf);
-    for (i = 0; i < len; i++) {
-	switch (buf[i]) {
-	    CPUID02_CACHE_PRN();
-	case 0xFF:
-	    deterministic = 1;
-	    break;
-	default:
-	    break;
+	switch (cash[i].cachetype)
+   {
+		case DATACACHE: return "DCACHE";
+		case INSTCACHE: return "ICACHE";
+		case UNICACHE: return "CACHE";
+		default:
+			printf("get_cache_type(%d): Error\n", i);
+			return "ERRORCACHE";
 	}
-    }
-    if (!deterministic) return;
+}
 
-    memset(cash, 0, sizeof(cash));
-    len = __cpuid_deterministic_cache_info(cash, 8);
-    for (i = 0; i < len; i++) {
-	switch (cash[i].cachetype) {
-	case DATACACHE:
-	    printf("DCACHE:");
-	    break;
-	case INSTCACHE:
-	    printf("ICACHE:");
-	    break;
-	case UNICACHE:
-	    printf("CACHE:");
-	    break;
-	default:
-	    break;
+int get_cache_info(int i, int m)
+{
+	switch (m)
+	{
+		case 0: return cash[i].sets;
+    	case 1: return cash[i].linesize;
+    	case 2: return cash[i].partitions;
+    	case 3: return cash[i].ways;
+    	case 4: return cash[i].level;
+    	case 5: return ((cash[i].sets * cash[i].linesize * cash[i].partitions * cash[i].ways) >> 10);
+    	default:
+    		printf("get_cache_info(%d, %d): Error\n", i, m);
+    		return -1;
 	}
-	printf(" lvl %d, ", cash[i].level);
-	capacity = cash[i].sets * cash[i].linesize * 
-	    cash[i].partitions * cash[i].ways;
-	printf("%d KB, ", capacity >> 10);
-	printf("sets:%d, linesz:%d, part:%d, ways:%d\n",
-	    cash[i].sets, cash[i].linesize, cash[i].partitions, cash[i].ways);
-    }
 }
 
 /* 
@@ -598,12 +629,27 @@ void
 __attribute__((cold))
 sys_stat_mem_print(const sys_mem_item* info)
 {
-    const MEMORYSTATUSEX* stat = &info->memstatex;
+   const MEMORYSTATUSEX* stat = &info->memstatex;
+	printf("%8"PRIu64" %8"PRId32" %10"PRIu64" %13"PRIu64" %12"PRIu64"\n",
+	    	stat->ullAvailPhys/1000, (int)stat->dwMemoryLoad, 
+	    	stat->ullTotalPageFile/1000, stat->ullAvailPageFile/1000,
+            	stat->ullAvailVirtual/1000); 
+}
 
-    printf("%8"PRIu64" %8"PRId32" %10"PRIu64" %13"PRIu64" %12"PRIu64"\n",
-	    stat->ullAvailPhys/1000, (int)stat->dwMemoryLoad, 
-	    stat->ullTotalPageFile/1000, stat->ullAvailPageFile/1000,
-            stat->ullAvailVirtual/1000); 
+int64_t sys_stat_mem_get(const sys_mem_item *info, int i)
+{
+	const MEMORYSTATUSEX* stat = &info->memstatex;
+	switch (i)
+	{
+		case (0): return stat->ullAvailPhys/1000;
+		case (1): return (int)stat->dwMemoryLoad;
+		case (2): return stat->ullTotalPageFile/1000;
+		case (3): return stat->ullAvailPageFile/1000;
+		case (4): return stat->ullAvailVirtual/1000;
+		default:
+			printf("(sys_stat_mem_get(%d)) Error\n", i);
+			return 0;
+	}
 }
 
 void 
@@ -612,13 +658,29 @@ sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* after)
 {
     const MEMORYSTATUSEX* stat_b = &before->memstatex;
     const MEMORYSTATUSEX* stat_a = &after->memstatex;
-
-    printf("%8"PRId64" %8"PRId32" %10"PRId64" %13"PRId64" %12"PRId64"\n",
+	printf("%8"PRId64" %8"PRId32" %10"PRId64" %13"PRId64" %12"PRId64"\n",
 	    (long long)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000, 
 	    (int)(stat_a->dwMemoryLoad - stat_b->dwMemoryLoad), 
 	    (long long)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000, 
 	    (long long)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000, 
             (long long)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000); 
+}
+
+int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i)
+{
+	const MEMORYSTATUSEX* stat_b = &before->memstatex;
+	const MEMORYSTATUSEX* stat_a = &after->memstatex;
+	switch (i)
+	{
+		case (0): return (long long)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000;
+	   case (1): return (int)(stat_a->dwMemoryLoad - stat_b->dwMemoryLoad);
+	   case (2): return (long long)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000;
+	   case (3): return (long long)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000;
+      case (4): return (long long)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000;
+      default:
+      	printf("sys_stat_mem_get_delta(%d): Error\n", i);
+         return 0;
+	}
 }
 #else
 int sys_stat_mem_init(sys_mem_ctx* ctx)
@@ -706,18 +768,59 @@ void sys_stat_mem_print_header(void)
 
 void sys_stat_mem_print(const sys_mem_item* info)
 {
-    printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
+	printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
 		    info->free_kib, info->buffer_kib,
 		    info->cache_kib, info->active_kib, info->inactive_kib,
 		    info->pgpgin, info->pgpgout, info->pswpin,
 		    info->pswpout, info->pgmajfault);
 }
 
+int64_t sys_stat_mem_get(const sys_mem_item *info, int i)
+{
+	switch (i)
+	{
+		case (0): return info->free_kib;
+		case (1): return info->buffer_kib;
+		case (2): return info->cache_kib;
+		case (3): return info->active_kib;
+		case (4): return info->inactive_kib;
+		case (5): return info->pgpgin;
+		case (6): return info->pgpgout;
+		case (7): return info->pswpin;
+		case (8): return info->pswpout;
+		case (9): return info->pgmajfault;
+		default:
+			printf("(sys_stat_mem_get(*info, %d) Error\n", i);
+			return 0;
+	}
+}
+
+int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i)
+{
+	switch (i)
+	{
+		case (0): return after->free_kib - before->free_kib;
+		case (1): return after->buffer_kib - before->buffer_kib;
+		case (2): return after->cache_kib - before->cache_kib;
+		case (3): return after->active_kib - before->active_kib;
+		case (4): return after->inactive_kib - before->inactive_kib;
+		case (5): return after->pgpgin - before->pgpgin;
+		case (6): return after->pgpgout -  before->pgpgout;
+		case (7): return after->pswpin - before->pswpin;
+		case (8): return after->pswpout - before->pswpout;
+		case (9): return after->pgmajfault - before->pgmajfault;
+		default:
+			printf("(sys_stat_mem_get_delta(%d) Error\n", i);
+			return 0;
+	}
+}
+
 void sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* after)
 {
-    printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
+	
+	printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
 		    after->free_kib - before->free_kib, after->buffer_kib - before->buffer_kib,
-		    after->cache_kib - before->cache_kib, after->active_kib - before->cache_kib, 
+		    after->cache_kib - before->cache_kib, after->active_kib - before->active_kib,
 		    after->inactive_kib - before->inactive_kib,
 		    after->pgpgin - before->pgpgin, after->pgpgout -  before->pgpgout, 
 		    after->pswpin - before->pswpin,
@@ -727,147 +830,160 @@ void sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* af
 #endif
 
 
-void sys_print_pmbench_info(void)
-{
-    printf("pmbench version: %s\n", argp_program_version);
-}
-
+void sys_print_pmbench_info() { printf("pmbench version: %s\n", argp_program_version); }
 
 #ifdef _WIN32
-#define NAME_BUF_SIZE 64 
-void sys_print_os_info(void)
+#define NAME_BUF_SIZE 64
+
+DWORD os_version;
+TCHAR infBuf[NAME_BUF_SIZE];
+char * sys_print_hostname()
 {
-    TCHAR infBuf[NAME_BUF_SIZE];
-    DWORD bufCharCount = NAME_BUF_SIZE;
-    DWORD version; 
-    int maj, min, build = 0;
-    SYSTEM_INFO sysinfo;
-    const char* proc_arch = "unknown";
-    
-    if (!GetComputerName(infBuf, &bufCharCount)) {
-	printf("Hostname unkwnown.\n");
-	goto version_info;
-    }
-    printf("Hostname       : %s\n", infBuf);
-
-version_info:
-    version = GetVersion();
-    maj = (int)(LOBYTE(LOWORD(version)));
-    min = (int)(HIBYTE(LOWORD(version)));
-    if (version < 0x80000000) {
-	build = (int)(HIWORD(version));
-    }
-
-    GetNativeSystemInfo(&sysinfo);
-    switch (sysinfo.wProcessorArchitecture) {
-    case 9:
-	proc_arch = "x64";
-	break;
-    case 6:
-	proc_arch = "Itanium";
-	break;
-    case 0:
-	proc_arch = "x86";
-	break;
-    }
-
-    printf("OS/kernel type : Windows %s version %d.%d (build %d)\n", 
-	    proc_arch, maj, min, build);
-    return;
+	os_version = GetVersion();
+	//TCHAR infBuf[NAME_BUF_SIZE];
+	DWORD bufCharCount = NAME_BUF_SIZE;
+	if (!GetComputerName(infBuf, &bufCharCount)) 
+	{
+		printf("Hostname unknown.\n");
+	   return "unknown";
+   }
+   else printf("Hostname       : %s\n", infBuf);
+	return infBuf;
+}
+int sys_get_os_version(int i)
+{
+	switch (i)
+	{
+		case 1: return (int)(LOBYTE(LOWORD(os_version)));
+		case 2: return (int)(HIBYTE(LOWORD(os_version)));
+		case 3:
+			if (os_version < 0x80000000) { return (int)(HIWORD(os_version)); }
+			else return 0;
+		default: return 0;
+	}
+}
+char * sys_get_cpu_arch()
+{
+	SYSTEM_INFO sysinfo;
+	GetNativeSystemInfo(&sysinfo);
+   switch (sysinfo.wProcessorArchitecture) 
+   {
+   	case 9: return "x64";
+    	case 6: return "Itanium";
+    	case 0: return "x86";
+		default: return "unknown";
+   }
 }
 
 #ifndef LOCALE_INVARIANT
 #define LOCALE_INVARIANT 0x007f
 #endif
-void sys_print_time_info(void)
+int getDateFormat_ret;
+char time_strbuf[64], date_strbuf[64], year_strbuf[8];
+int sys_print_time_info()
 {
-    int ret;
-    char time_strbuf[64];
-    char date_strbuf[64];
-    char year_strbuf[8];
-    SYSTEMTIME systime;
-
-    GetLocalTime(&systime);
-
-    ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, 
-	    "ddd MMM dd", date_strbuf, 64);
-    if (!ret) {
-	printf("date/time failed\n");
-	return;
-    }
-    ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, 
-	    "yyyy", year_strbuf, 8);
-    if (!ret) {
-	printf("date/time failed\n");
-	return;
-    }
-    ret = GetTimeFormat(LOCALE_INVARIANT, TIME_FORCE24HOURFORMAT, &systime, 
-	    NULL, time_strbuf, 64);
-    if (!ret) {
-	printf("date/time failed\n");
-	return;
-    }
-    printf("Reported on    : %s %s %s\n", date_strbuf, time_strbuf, year_strbuf);
-    return;
+   SYSTEMTIME systime;
+   GetLocalTime(&systime);
+   getDateFormat_ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, "ddd MMM dd", date_strbuf, 64);
+	if (!getDateFormat_ret) { printf("date/time failed\n"); return 0; }
+   getDateFormat_ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, "yyyy", year_strbuf, 8);
+   if (!getDateFormat_ret) { printf("date/time failed\n"); return 0; }
+   getDateFormat_ret = GetTimeFormat(LOCALE_INVARIANT, TIME_FORCE24HOURFORMAT, &systime, NULL, time_strbuf, 64);
+   if (!getDateFormat_ret) { printf("date/time failed\n"); return 0; }
+   printf("Reported on    : %s %s %s\n", date_strbuf, time_strbuf, year_strbuf);
+   return 1;
+}
+char * sys_get_time_info(int i)
+{
+	if (!getDateFormat_ret) return "unavailable";
+	switch (i)
+	{
+		case (9): return date_strbuf;
+		case (10): return time_strbuf;
+		case (5): return year_strbuf;
+		default:
+			printf("sys_get_time_info(%d): Error\n", i);
+			return "error";
+	}
 }
 
-void sys_print_uuid(void)
+char * sys_print_uuid()
 {
-    unsigned char* rpc_str;
-    UUID uu;
-    RPC_STATUS rpc_ret;
-    
-    
-    rpc_ret = UuidCreate(&uu);
-    rpc_ret = UuidToString(&uu, &rpc_str);
-    if (rpc_ret != RPC_S_OK) {
-	printf("Benchmark UUID : failed to generate UUID\n");
-	return;
-    }
-    
-    printf("Benchmark UUID : %s\n", rpc_str);
-    RpcStringFree(&rpc_str);
+	unsigned char* rpc_str;
+   UUID uu;
+   RPC_STATUS rpc_ret;
+   rpc_ret = UuidCreate(&uu);
+   rpc_ret = UuidToString(&uu, &rpc_str);
+   if (rpc_ret != RPC_S_OK)
+   {
+		printf("Benchmark UUID : failed to generate UUID\n");
+		return "failed";
+   }   
+   printf("Benchmark UUID : %s\n", rpc_str);
+   return rpc_str; //RpcStringFree(&rpc_str);
 }
 
 #else
 
-void sys_print_os_info(void)
+struct utsname uname_buf;
+int uname_ret;
+char * sys_print_hostname()
 {
-    int ret;
-    struct utsname uname_buf;
-    ret = uname(&uname_buf);
-    if (ret) {
-	perror("uname() failed");
-	printf("Hostname unknown.\n");
-	return;
-    }
-    printf("Hostname       : %s\n", uname_buf.nodename);
-    printf("OS/kernel type : %s %s %s\n", uname_buf.sysname, uname_buf.release, uname_buf.machine);
+	uname_ret = uname(&uname_buf);
+	if (uname_ret)
+   {
+		perror("uname() failed");
+		printf("Hostname unknown.\n");
+		return "unknown";
+   }
+   return uname_buf.nodename;
+}
+char * sys_get_os_version(int i)
+{
+	switch (i)
+	{
+		case 0: return uname_buf.sysname;
+		case 4: return uname_buf.release;
+		default: return 0;
+	}
+}
+char * sys_get_cpu_arch() { return uname_buf.machine; }
+
+struct tm timestamp_time;
+int sys_print_time_info()
+{
+   char strbuf[64]; 
+   time_t t = time(NULL);
+   if (t == ((time_t) -1)) { perror("time() failed"); return 0; }
+   printf("Reported on    : %s", ctime_r(&t, strbuf));  /* N.B. ctime adds \n at the end */
+   timestamp_time = *gmtime(&t);
+   return 1;
+}
+int sys_get_time_info(int i)
+{
+	switch (i)
+	{
+		case (0): return timestamp_time.tm_sec;
+		case (1): return timestamp_time.tm_min;
+		case (2): return timestamp_time.tm_hour;
+		case (3): return timestamp_time.tm_mday;
+		case (4): return timestamp_time.tm_mon;
+		case (5): return timestamp_time.tm_year;
+		case (6): return timestamp_time.tm_wday;
+		case (7): return timestamp_time.tm_yday;
+		case (8): return timestamp_time.tm_isdst;
+		default: return 0;
+	}
 }
 
-void sys_print_time_info(void)
+char uuid_str[37];
+char * sys_print_uuid()
 {
-    time_t t;
-    char strbuf[64];
-    char *timestr;
-    
-    t = time(NULL);
-    if (t == ((time_t) -1)) {
-	perror("time() failed");
-	return;
-    }
-    timestr = ctime_r(&t, strbuf);
-    printf("Reported on    : %s", timestr);  /* N.B. ctime addes \n at the end */
-}
-
-void sys_print_uuid(void)
-{
-    char str[37]; /* 36-byte string plus null */
+    //char str[37]; /* 36-byte string plus null */
     uuid_t uu;
-
     uuid_generate(uu);
-    uuid_unparse(uu, str);
-    printf("Benchmark UUID : %s\n", str);
+    uuid_unparse(uu, uuid_str); 
+    printf("Benchmark UUID : %s\n", uuid_str);
+    return uuid_str;
 }
-
 #endif

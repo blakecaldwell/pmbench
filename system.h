@@ -43,7 +43,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <windows.h>
-
+#include <inttypes.h>
 #include <unistd.h>
 #include "rdtsc.h"
 
@@ -134,12 +134,11 @@ static inline
 int my_strncmp(const char* a, const char* b, size_t n)
 {
     while (*a == *b) {
-	if (--n == 0) return 0;
-	if (*a == 0) return 0;
-	a++;
-	b++;
+    	if (--n == 0) return 0;
+    	if (*a == 0) return 0;
+    	a++;
+    	b++;
     }
-
     return (*a - *b);
 }
 
@@ -214,13 +213,13 @@ extern struct sys_timestamp* get_timestamp_from_name(const char* str);
 
 #define SYS_PMBENCH_VERSION_STRING "pmbench 0.4"
 
-extern void sys_print_pmbench_info(void);
-extern void sys_print_os_info(void);
-extern void sys_print_time_info(void);
-extern void sys_print_uuid(void);
+extern void sys_print_pmbench_info();
+extern void sys_print_os_info();
+extern int sys_print_time_info();
+extern char * sys_print_uuid();
 
-extern void print_tlb_info(void) __attribute__((cold));
-extern void print_cache_info(void) __attribute__((cold));
+extern int print_tlb_info() __attribute__((cold));
+extern int print_cache_info() __attribute__((cold));
 
 /* 
  * Linux memory usage statistics - /proc/meminfo
@@ -240,10 +239,13 @@ typedef struct sys_mem_ctx {
 } sys_mem_ctx;
 
 #ifdef _WIN32
+//typedef int64_t long long;
 typedef struct sys_mem_item {
     MEMORYSTATUSEX memstatex;
     int	recorded;
 } sys_mem_item;
+extern int sys_get_os_version(int i);
+extern char * sys_get_time_info(int i);
 #else
 /* currently 16 * 4 bytes = 64 bytes, meaning 64 entries per 4K page */
 typedef struct sys_mem_item {
@@ -260,6 +262,8 @@ typedef struct sys_mem_item {
     long long pgmajfault; // vmstat->pgmajfault;
     int recorded;
 } sys_mem_item;
+extern char * sys_get_os_version(int i);
+extern int sys_get_time_info(int i);
 #endif
 
 extern int sys_stat_mem_init(sys_mem_ctx* ctx);
@@ -271,6 +275,11 @@ extern int sys_stat_mem_exit(sys_mem_ctx* ctx);
 
 extern void test_stat_mem(void);
 
-
-
+extern int64_t 			sys_stat_mem_get(const sys_mem_item *info, int i);
+extern int64_t 			sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i);
+extern char * 				sys_print_hostname();
+extern char * 				sys_get_cpu_arch();
+extern unsigned char 	get_tlb_info(int i);
+extern char * 				get_cache_type(int i);
+extern int 					get_cache_info(int i, int m);
 #endif

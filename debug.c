@@ -416,16 +416,16 @@ test_histo_calculation(void)
     dump_histogram_log2(&bin);
 }
 
-extern int touch_only(char* buf, size_t pfn);
+//extern int touch_only(char* buf, size_t pfn);
 
-access_fn_set histogram_access_old = {
+/*access_fn_set histogram_access_old = {
     touch_only,
     access_histogram_old,
     finish_histogram_old,
     histogram_report_old,
     "histo_old",
     "Touch and keep latency histogram (old format)"
-};
+};*/
 
 
 #ifdef _WIN32
@@ -440,7 +440,7 @@ void test_stat_mem(void)
 	perror("sys_stat_mem_init:");
 	exit(ret);
     }
-    sys_stat_mem_print(&info);
+    //sys_stat_mem_print(&info);
 }
 
 
@@ -473,7 +473,7 @@ void test_stat_mem(void)
 	perror("sys_stat_mem_init:");
 	exit(ret);
     }
-    sys_stat_mem_print(&info);
+    //sys_stat_mem_print(&info);
 }
 #endif
 

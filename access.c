@@ -34,15 +34,13 @@
 #include <string.h>
 #include <math.h>
 
-#include <inttypes.h>
-
 #include "rdtsc.h"
 #include "system.h"
 #include "access.h"
 
 /* a few atomic operation definitions */
 static inline
-void atomic_inc(unsigned* pval) {
+void atomic_inc(uint64_t *pval) { //changed from unsigned
     asm volatile (
 	"lock; incl %0" 
 	: "=m"(*(volatile unsigned*)pval)
@@ -51,7 +49,7 @@ void atomic_inc(unsigned* pval) {
 }
 
 static inline
-void atomic_dec(unsigned* pval) {
+void atomic_dec(uint64_t *pval) {
     asm volatile (
 	"lock; decl %0" 
 	: "=m"(*(volatile unsigned*)pval)
@@ -59,53 +57,15 @@ void atomic_dec(unsigned* pval) {
     );
 }
 
-/** 
- * NB. Using function pointer to 1) choose method easily and 2) avoid
- * possible compiler optimization around the function call.
- */
+static int finish_touch(char* buf, size_t index, int ratio) { return 1; }
 
-/*
- * Leave first 128 bytes intact so that other complicated access function
- * can use the space.
- */
-
-int
-_code
-touch_only(char* buf, size_t pfn)
-{
-    static int _val_sink = 0;
-    
-    // memory read AND write. 128 is an offset chosen randomly
-    int* ptr = (int*)(buf + (pfn << PAGE_SHIFT) + 128);
-    _val_sink += *ptr;
-    *ptr = _val_sink;
-    return _val_sink;
-}
-
-static
-int finish_touch(char* buf, size_t num_pages)
-{
-    return 1;
-}
-
-static
-void touch_report(char* buf)
+static void touch_report(char* buf, int ratio)
 {
     printf("touch_report: nothing to report\n");
     return;
 }
 
-access_fn_set touch_access = {
-    .warmup = touch_only,
-    .exercise = touch_only,
-    .finish = finish_touch,
-    .report = touch_report,
-    .name = "touch",
-    .description = "Simple read touching"
-};
-
-/*
- * long_latency counts log2-base latency >= 2^23 nsec
+/** long_latency counts log2-base latency >= 2^23 nsec
  * consumes 1024 bytes (= 16*16*4 = 1024) 
  * N.B. this version uses bucket_sub[0].hex[8-15] for storing long latencies 
  * bucket_sub[0].hex[ 8] := [2^23, 2^24)
@@ -114,167 +74,207 @@ access_fn_set touch_access = {
  * ...
  * bucket_sub[0].hex[15] := [2^30, 2^32) <- 1-4 seconds
  * bucket_sub[0].hex[0] stores events < 2^8 (= 256) ns
- * (bucket_sub[0].hex[1-7] are unused) 
+ * (bucket_sub[0].hex[1-7] are unused)
  */
 /*
  * Each log2 bucket is split into 16 bins (hex), where each bin 
  * counts the number of samples occurred in corresponding 1/16th range.
  * We simply use the next 4 bits to determine which hex to count.
  */
-struct histogram_sub {
-    uint32_t hex[16];
-} __attribute__((packed));
 
-
-struct histogram_log2_sub {
-    union {
-	struct histogram_sub bucket_sub[16];
-	uint64_t hit_counts_sum;
-    };
-} __attribute__((packed));
+struct histogram_sub_64 { uint64_t hex[16]; }  __attribute__((packed)); //64-bit histogram
+struct histogram_64 { struct histogram_sub_64 buckets[32]; } __attribute__((packed)); //64-bit read and write histogram, occupies a full page
 
 extern const struct sys_timestamp* get_tsops(void);
 
-static
-_code
-int access_histogram(char* buf, size_t pfn)
+_code int read_access_histogram(char* buf, size_t pfn, unsigned int offset)
 {
-    struct stopwatch sw;
-    static int _val_sink = 0;
-    struct histogram_log2_sub* histo;
-    int* ptr;
-    int index;
-    uint32_t elapsed_nsec;
-    uint32_t* pcounter;
-
-    sw_reset(&sw, get_tsops());
-    sw_start(&sw);
-    ptr = (int*)(buf + (pfn << PAGE_SHIFT) + (2048 - 64));
-    _val_sink += *ptr;
-    *ptr = _val_sink;
-    sw_stop(&sw);
-
-    histo = (struct histogram_log2_sub*)(buf + (pfn << PAGE_SHIFT));
-    elapsed_nsec = sw_get_nsec(&sw);
-    if (elapsed_nsec < (1 << 8)) {
-	pcounter = &histo->bucket_sub[0].hex[0];
-    } else {
-	index = ilog2(elapsed_nsec) - 7;
-	if (index < 16) {
-	    int sub_index = (~(1u << (index + 7)) & elapsed_nsec) >> (index + 7 - 4);
-	    pcounter = &histo->bucket_sub[index].hex[sub_index];
-	} else if (index >= 16+7) {
-	    pcounter = &histo->bucket_sub[0].hex[8 + 7];
-	} else {
-	    pcounter = &histo->bucket_sub[0].hex[8 + index - 16];
-	}
-    }
-    atomic_inc(pcounter);
-    return _val_sink;
+	static volatile int _val_sink = 0;
+	//volatile register int _val_sink = 0;
+	int *ptr = (int*)(buf + (pfn << PAGE_SHIFT) + (offset >> 22) * 4); //access address = ( base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
+	//printf("\tPage:\t%d\t\tOffset:\t%04x\n", (int) pfn, offset >> 22);
+    struct stopwatch swr;
+    sw_reset(&swr, get_tsops());
+    sw_start(&swr);
+    asm volatile (		//"nop\n\t"
+    							//"mfence \n\t"
+    							"mov %1, %0" //\n\t"
+    							//"nop"
+    						: 	"=r" (_val_sink)
+							: 	"m" (*ptr) );
+							//:	"memory");    	//_val_sink = *ptr;
+    sw_stop(&swr);
+    return sw_get_nsec(&swr); //_val_sink;
 }
 
-/*
- * we use buf[2048-4095] for storing result.
- */
-static
-int finish_histogram(char* buf, size_t num_pages)
+_code int write_access_histogram(char* buf, size_t pfn, unsigned int offset)
 {
-    struct histogram_log2_sub* histo;
-    struct histogram_log2_sub* result = (struct histogram_log2_sub*)(buf + 2048);
-    size_t i;	// In Win64 long is 32bit and overflows when > 2GiB.
-    int j, k;
-    
-    for (i = 0; i < num_pages; ++i) {
-	histo = (struct histogram_log2_sub*)(buf + (i << PAGE_SHIFT));
-
-	/* special case for [0][0] - count 64bit to prevent overflow */
-	result->hit_counts_sum += histo->bucket_sub[0].hex[0];
-	for (k = 8; k < 16; ++k) {
-	    result->bucket_sub[0].hex[k] += histo->bucket_sub[0].hex[k];
-	}
-
-	for (j = 1; j < 16; ++j) {
-	    for (k = 0; k < 16; ++k) {
-		result->bucket_sub[j].hex[k] += histo->bucket_sub[j].hex[k];
-	    }
-	}
-    }
-    
-    return 1;
+	volatile register int _val_sink = 0;
+	int *ptr = (int*)(buf + (pfn << PAGE_SHIFT) + (offset >> 22) * 4);
+    struct stopwatch sww;
+    sw_reset(&sww, get_tsops());
+    sw_start(&sww);
+    asm volatile ( 		//"nop\n\t"
+    							//"mfence \n\t"
+    							"mov %1, %0" //\n\t"
+								//"nop"
+           				: 	"=m" (*ptr)
+       					: 	"r" (_val_sink) );
+							//:	"memory");    	//*ptr = _val_sink;
+    sw_stop(&sww);
+    return sw_get_nsec(&sww);
 }
 
-void
-__attribute__((cold))
-dump_histogram_log2_new(const struct histogram_log2_sub* bin)
+_code int record_touch_dummy(char *a, unsigned int b) { return 1; }
+
+_code int record_histogram(char *stats, unsigned int elapsed_nsec)
 {
+	/*histo = (struct histogram_log2_sub*)(buf + (pfn << PAGE_SHIFT));
+    	elapsed_nsec = sw_get_nsec(&sw);
+    	if (elapsed_nsec < (1 << 8)) 
+	{
+		pcounter = &histo->bucket_sub[0].hex[0];
+    	} 
+	else 
+	{
+		index = ilog2(elapsed_nsec) - 7;
+		if (index < 16) 
+		{
+	    		int sub_index = (~(1u << (index + 7)) & elapsed_nsec) >> (index + 7 - 4);
+	    		pcounter = &histo->bucket_sub[index].hex[sub_index];
+		} 
+		else if (index >= 16+7) 
+		{
+	    	pcounter = &histo->bucket_sub[0].hex[8 + 7];
+		} 
+		else 
+		{
+		    pcounter = &histo->bucket_sub[0].hex[8 + index - 16];
+		}
+    	}
+    	atomic_inc(pcounter);*/
+	struct histogram_sub_64* histo = (struct histogram_sub_64*)(stats); //this should be pointing to the thread's read/write histogram page
+	uint64_t *pcounter; //changed from u32
+	if (elapsed_nsec < (1 << 8)) { pcounter = &(histo[0].hex[0]); }
+	else
+	{
+		int index = ilog2(elapsed_nsec) - 7;
+		if (index < 16)
+		{
+			int sub_index = (~(1u << (index + 7)) & elapsed_nsec) >> (index + 7 - 4);
+			pcounter = &(histo[index].hex[sub_index]);
+		}
+		else if (index >= 16+7) { pcounter = &(histo[0].hex[8 + 7]); }
+		else { pcounter = &(histo[0].hex[8 + index - 16]); }
+	}
+	atomic_inc(pcounter);
+	return 1;
+}
+
+static int finish_histogram(char *stats, size_t index, int ratio)
+{
+	struct histogram_64 *result = (struct histogram_64*) stats;
+	struct histogram_64 *histo = (struct histogram_64*) (stats + (index - 1) * 4096);
+	int bucket, hex;
+	if (ratio > 0)
+	{
+		for (bucket = 0; bucket <= 0x0f; bucket++)
+		{
+			for (hex = 0; hex <= 0x0f; hex++) { result->buckets[bucket].hex[hex] += histo->buckets[bucket].hex[hex]; }
+		}
+	}
+	if (ratio < 100)
+	{
+		for (bucket = 0; bucket <= 0x0f; bucket++)
+		{
+			for (hex = 0; hex <= 0x0f; hex++) { result->buckets[bucket+16].hex[hex] += histo->buckets[bucket+16].hex[hex]; }
+		}
+	}
+	return 1;
+}
+
+uint64_t * get_histogram_bucket(char *buf, int writehisto, int bucketnum)
+{
+	struct histogram_64 *bin = (struct histogram_64 *)(buf);
+	return bin->buckets[bucketnum + (writehisto*16)].hex;
+}
+
+void __attribute__((cold)) dump_histogram_64(const struct histogram_64 *bin, int writehisto) //pass this a 1 to print the write histogram, 0 for read
+{
+	writehisto *= 16;
     int i, j;
     uint64_t sum_count;
-    printf("2^(00,08) ns: %"PRIu64"\n", bin->hit_counts_sum);
-    for (i = 1; i < 16; ++i) {
-	sum_count = 0;
-	for (j = 0; j < 16; ++j) {
-	    sum_count += bin->bucket_sub[i].hex[j];
-	}
-	printf("2^(%02d,%02d) ns: %"PRIu64"  ", i + 7, i + 8, sum_count);
-	printf("[%d, %d, %d, %d, %d, %d, %d, %d, " \
-		"%d, %d, %d, %d, %d, %d, %d, %d]\n", 
-		bin->bucket_sub[i].hex[0], 
-		bin->bucket_sub[i].hex[1], 
-		bin->bucket_sub[i].hex[2], 
-		bin->bucket_sub[i].hex[3],
-		bin->bucket_sub[i].hex[4], 
-		bin->bucket_sub[i].hex[5], 
-		bin->bucket_sub[i].hex[6], 
-		bin->bucket_sub[i].hex[7],
-		bin->bucket_sub[i].hex[8], 
-		bin->bucket_sub[i].hex[9], 
-		bin->bucket_sub[i].hex[10], 
-		bin->bucket_sub[i].hex[11],
-		bin->bucket_sub[i].hex[12], 
-		bin->bucket_sub[i].hex[13], 
-		bin->bucket_sub[i].hex[14], 
-		bin->bucket_sub[i].hex[15] );
-    }
-
-    for (i = 0; i < 7; ++i) {
-	printf("2^(%d,%d) ns: %d\n", i + 23, i + 24, bin->bucket_sub[0].hex[8 + i]);
-    }
-    printf("2^(30,32) ns: %d\n", bin->bucket_sub[0].hex[8 + 7]);
+    printf("2^(00,08) ns: %"PRIu64"\n", bin->buckets[writehisto].hex[0]);
+    for (i = 1; i < 16; ++i)
+    {
+    	sum_count = 0;
+    	for (j = 0; j < 16; ++j) { sum_count += bin->buckets[i + writehisto].hex[j]; } 		
+    	printf("2^(%02d,%02d) ns: %"PRIu64"  ", i + 7, i + 8, sum_count);
+    	printf("[%"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", " \
+    		"%"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64", %"PRIu64"]\n",
+			bin->buckets[i + writehisto].hex[0],
+			bin->buckets[i + writehisto].hex[1],
+			bin->buckets[i + writehisto].hex[2],
+			bin->buckets[i + writehisto].hex[3],
+			bin->buckets[i + writehisto].hex[4],
+			bin->buckets[i + writehisto].hex[5],
+			bin->buckets[i + writehisto].hex[6],
+			bin->buckets[i + writehisto].hex[7],
+			bin->buckets[i + writehisto].hex[8],
+			bin->buckets[i + writehisto].hex[9],
+			bin->buckets[i + writehisto].hex[10],
+			bin->buckets[i + writehisto].hex[11],
+			bin->buckets[i + writehisto].hex[12],
+			bin->buckets[i + writehisto].hex[13],
+			bin->buckets[i + writehisto].hex[14],
+			bin->buckets[i + writehisto].hex[15] );
+   }
+   for (i = 0; i < 7; ++i) { printf("2^(%d,%d) ns: %"PRIu64"\n", i + 23, i + 24, bin->buckets[writehisto].hex[8 + i]); }
+   printf("2^(30,32) ns: %"PRIu64"\n\n", bin->buckets[writehisto].hex[8 + 7]);
 }
 
-static
-void histogram_report(char* buf)
+static void histogram_report(char* buf, int ratio)
 {
-    struct histogram_log2_sub* result = (struct histogram_log2_sub*)(buf + 2048);
+    struct histogram_64 *result = (struct histogram_64*)(buf);
     printf("# Access latency histogram\n");
-    dump_histogram_log2_new(result);
+    if (ratio > 0) { printf("Read:\n"); dump_histogram_64(result, 0); }
+    if (ratio < 100) { printf("Write:\n"); dump_histogram_64(result, 1); }
     return;
 }
 
+access_fn_set touch_access = {
+    .warmup = NULL, //touch_only,
+    .exercise_read = read_access_histogram, 	//should this be an edited version without the stopwatch?
+	.exercise_write = write_access_histogram,
+	.record = record_touch_dummy,
+    .finish = finish_touch,
+    .report = touch_report,
+    .name = "touch",
+    .description = "Simple touching"
+};
+
 access_fn_set histogram_access = {
-    .warmup = touch_only,
-    .exercise = access_histogram,
+    .warmup = NULL, //touch_only,
+    .exercise_read = read_access_histogram,
+	.exercise_write = write_access_histogram,
+	.record = record_histogram,
     .finish = finish_histogram,
     .report = histogram_report,
     .name = "histo",
     .description = "Touch and keep latency histogram"
 };
 
-/*
- * all access_fns
- */
-static access_fn_set* all_access_fn[] = {
-    &touch_access, &histogram_access, 0
-};
+/*b* all access_fns */
+static access_fn_set* all_access_fn[] = { &touch_access, &histogram_access, 0 };
 
 access_fn_set* get_access_from_name(const char* str)
 {
     int i = 0;
     if (!str) return 0;
-    while (all_access_fn[i]) {
-	if (!my_strncmp(all_access_fn[i]->name, str, 16))
-	    return all_access_fn[i];
-	i++;
+    while (all_access_fn[i])
+    {
+    	if (!my_strncmp(all_access_fn[i]->name, str, 16)) return all_access_fn[i];
+    	i++;
     }
     return 0;
 }

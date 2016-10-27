@@ -51,8 +51,8 @@ endif
 
 #LFLAGS_LINUX += -Wl,--section-start=.pmbench_code_page=408000
 # uncomment below to compile-in multi-threaded benchmark
-#CFLAGS_LINUX += -DPMB_THREAD=1 -pthread
-#LFLAGS_LINUX += -pthread 
+CFLAGS_LINUX += -DPMB_THREAD=1 -pthread
+LFLAGS_LINUX += -pthread 
 # uncomment below to add XALLOC
 #CFLAGS_LINUX += -DXALLOC -I../xalloc
 #LFLAGS_LINUX += ../xalloc/libxalloc.a
@@ -64,13 +64,14 @@ LIBPATH_WINARGP := ../argpwin
 CFLAGS_WIN := -D_WIN32_WINNT=0x0501 -I$(INCPATH_WINARGP)
 LFLAGS_WIN := -lrpcrt4  -L$(LIBPATH_WINARGP)
 # uncomment below to compile-in multi-threaded benchmark
-#CFLAGS_WIN += -DPMB_THREAD=1 -lpthread
-#LFLAGS_WIN += -lpthread
+CFLAGS_WIN += -DPMB_THREAD=1 -lpthread
+LFLAGS_WIN += -lpthread
 # uncomment below to add XALLOC
 #CFLAGS_WIN += -DXALLOC -I../xalloc
 #LFLAGS_WIN += ../xalloc/xalloc.dll 
 #-save-temps
 
+CFLAGS_WIN += -I/usr/include/libxml2
 LFLAGS_WIN += $(LIBPATH_WINARGP)/argp.dll
 
 .PHONY: all clean dist dist_src dist_bin dist_bin32 dist_bin64 dist_doc check help
@@ -78,8 +79,8 @@ LFLAGS_WIN += $(LIBPATH_WINARGP)/argp.dll
 all: pmbench pmbench.exe
 
 pmbench: pmbench.o pattern.o system.o access.o debug.o
-	$(CC) -lm -luuid -o $@ $+ $(LFLAGS_LINUX)
-	objdump -d $@ > $@.dmp
+	$(CC) $+ -lm -luuid -lxml2 -o $@ $(LFLAGS_LINUX)
+	objdump -M intel -d $@ > $@.dmp
 
 
 check:
@@ -153,11 +154,11 @@ dist_src:
 
 
 pmbench.exe: pmbench.obj pattern.obj system.obj access.obj debug.obj 
-	$(WCC) -lm -lrpcrt4 -o $@ $+ $(LFLAGS_WIN) 
+	$(WCC) $+ -lm -lrpcrt4 -lxml2 -o $@ $(LFLAGS_WIN) 
 
 
 %.obj: %.c
-	$(WCC) -c $(CFLAGS) $(CFLAGS_WIN) -o $@ $<
+	$(WCC) -c $(CFLAGS) $(CFLAGS_WIN) -o $@ $< -lxml2
 
 
 .depend:  pmbench.c pattern.c system.c access.c debug.c

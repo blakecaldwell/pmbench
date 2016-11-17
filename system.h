@@ -55,6 +55,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "rdtsc.h"
 
@@ -76,16 +77,16 @@
  * flsl(2) = 2, flsl(3) = 2, flsl(4) = 3, flsl(5) = 3,
  * flsl(15) = 4, flsl(16) = 5, flsl(17) = 5 ... */
 #if defined(_WIN32) && defined(__MSVC__)
-static inline int __my_flsl(unsigned x)
+static inline int __my_flsl(uint32_t x)
 {
-    unsigned r = 0;
+    uint32_t r = 0;
 
     while (x >>= 1) r++;
 
     return r;
 }
 #else
-static inline int __my_flsl(unsigned x)
+static inline int __my_flsl(uint32_t x)
 {
     int ret;
     asm volatile (
@@ -96,7 +97,7 @@ static inline int __my_flsl(unsigned x)
 }
 #endif
 
-static inline int ilog2(unsigned x) {
+static inline int ilog2(uint32_t x) {
     return __my_flsl(x) - 1;
 }
 
@@ -109,10 +110,9 @@ static inline void __pause(void) {
  * otherwise returns number of pause loop iterations
  */
 static inline
-unsigned long long sys_delay(int min_clk)
+uint64_t sys_delay(int min_clk)
 {
-    unsigned long long count = 0;
-    unsigned long long past = rdtsc();
+    uint64_t count = 0, past = rdtsc();
 
     while (1) {
 	if ((rdtsc() - past) > min_clk) return count;
@@ -159,15 +159,14 @@ int my_strncmp(const char* a, const char* b, size_t n)
 struct stopwatch;
 
 struct sys_timestamp {
-    unsigned long long (*timestamp)(void);
+    uint64_t (*timestamp)(void);
     int (*init_base_freq)(struct sys_timestamp* sts);
-    unsigned base_freq_khz;
+    uint32_t base_freq_khz;
     const char* name;
 };
 
 struct stopwatch {
-    unsigned long long start_tsc;
-    unsigned long long elapsed_sum;
+    uint64_t start_tsc, elapsed_sum;
     const struct sys_timestamp* ops;
 }; 
 
@@ -178,7 +177,7 @@ void sw_reset(struct stopwatch* sw, const struct sys_timestamp* sts) {
 }
 
 static inline
-unsigned long long sw_start(struct stopwatch* sw) {
+uint64_t sw_start(struct stopwatch* sw) {
     sys_barrier();
     sw->start_tsc = sw->ops->timestamp();
     sys_barrier();
@@ -186,8 +185,8 @@ unsigned long long sw_start(struct stopwatch* sw) {
 }
 
 static inline
-unsigned long long sw_stop(struct stopwatch* sw) {
-    unsigned long long now;
+uint64_t sw_stop(struct stopwatch* sw) {
+    uint64_t now;
     sys_barrier();
     now = sw->ops->timestamp();
     sys_barrier();
@@ -196,18 +195,21 @@ unsigned long long sw_stop(struct stopwatch* sw) {
 }
 
 static inline
-unsigned long long sw_get_nsec(const struct stopwatch* sw) {
-    return (unsigned long long)((sw->elapsed_sum * 1000 * 1000)/sw->ops->base_freq_khz);
+uint32_t sw_get_nsec(const struct stopwatch* sw)
+{
+	uint64_t nsec = (uint64_t)((sw->elapsed_sum * 1000 * 1000)/sw->ops->base_freq_khz);
+	return (nsec >> 32 ? 0xFFFFFFFF : (uint32_t)nsec);
 }
 
 static inline
-unsigned sw_get_usec(const struct stopwatch* sw) {
-    return (unsigned)((sw->elapsed_sum * 1000)/sw->ops->base_freq_khz); 
+uint32_t sw_get_usec(const struct stopwatch* sw) { return (uint32_t)((sw->elapsed_sum * 1000)/sw->ops->base_freq_khz); 
 }
 
 extern struct sys_timestamp rdtsc_ops;
 extern struct sys_timestamp rdtscp_ops;
+#ifdef _WIN32
 extern struct sys_timestamp perfc_ops;
+#endif
 
 extern struct sys_timestamp* get_timestamp_from_name(const char* str);
 
@@ -239,13 +241,12 @@ typedef struct sys_mem_ctx {
 } sys_mem_ctx;
 
 #ifdef _WIN32
-//typedef int64_t long long;
 typedef struct sys_mem_item {
     MEMORYSTATUSEX memstatex;
     int	recorded;
 } sys_mem_item;
-extern int sys_get_os_version(int i);
-extern char * sys_get_time_info(int i);
+extern int sys_get_os_version_value(int i);
+extern char * sys_get_time_info_string(int i);
 #else
 /* currently 16 * 4 bytes = 64 bytes, meaning 64 entries per 4K page */
 typedef struct sys_mem_item {
@@ -255,15 +256,15 @@ typedef struct sys_mem_item {
     int cache_kib;	// meminfo->Cached
     int active_kib;	// meminfo->Active
     int inactive_kib;	// meminfo->Inactive
-    long long pgpgin;	// vmstat->pgpgin;
-    long long pgpgout;	// vmstat->pgpgout;
-    long long pswpin;	// vmstat->pswpin;
-    long long pswpout;	// vmstat->pswpout;
-    long long pgmajfault; // vmstat->pgmajfault;
+    int64_t pgpgin;	// vmstat->pgpgin;
+    int64_t pgpgout;	// vmstat->pgpgout;
+    int64_t pswpin;	// vmstat->pswpin;
+    int64_t pswpout;	// vmstat->pswpout;
+    int64_t pgmajfault; // vmstat->pgmajfault;
     int recorded;
 } sys_mem_item;
-extern char * sys_get_os_version(int i);
-extern int sys_get_time_info(int i);
+extern char * sys_get_os_version_string(int i);
+extern int sys_get_time_info_value(int i);
 #endif
 
 extern int sys_stat_mem_init(sys_mem_ctx* ctx);
@@ -279,7 +280,7 @@ extern int64_t 			sys_stat_mem_get(const sys_mem_item *info, int i);
 extern int64_t 			sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i);
 extern char * 				sys_print_hostname();
 extern char * 				sys_get_cpu_arch();
-extern unsigned char 	get_tlb_info(int i);
+extern uint8_t 	get_tlb_info(int i);
 extern char * 				get_cache_type(int i);
 extern int 					get_cache_info(int i, int m);
 #endif

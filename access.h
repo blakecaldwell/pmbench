@@ -35,12 +35,11 @@
 /* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 typedef struct access_fn_set {
-    int (*warmup)(char* buf, size_t pfn);		// callback for warmup touch
-    int (*exercise_read)(char *buf, size_t pfn, unsigned int offset);	// main touch function
-    int (*exercise_write)(char *buf, size_t pfn, unsigned int offset);
-    int (*record)(char* stats, unsigned int elapsed_nsec);
-    int (*finish)(char* buf, size_t index, int ratio);	// compile stat results
-    void (*report)(char* buf, int ratio);	// print results
+    uint32_t (*exercise_read)(uint32_t *ptr); // main touch function
+    uint32_t (*exercise_write)(uint32_t *ptr);
+    void (*record)(char *stats, uint32_t elapsed_nsec);
+    int (*finish)(char *buf, size_t index, int ratio);	// compile stat results
+    void (*report)(char *buf, int ratio);	// print results
     const char* name;
     const char* description;
 } access_fn_set;

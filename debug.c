@@ -331,6 +331,7 @@ int get_log2_bucket_index(unsigned elapsed_nsec) {
  * N.B. don't need to init scrub histogram since anynomous mmapping 
  * zero-inits memory.
  */
+/*
 static
 int access_histogram_old(char* buf, size_t pfn)
 {
@@ -349,6 +350,7 @@ int access_histogram_old(char* buf, size_t pfn)
     histo->bucket[get_log2_bucket_index(sw_get_nsec(&sw))] += 1;
     return _val_sink;
 }
+*/
 
 struct histo_result {
     struct histogram_log2 sum;
@@ -358,6 +360,7 @@ struct histo_result {
 /*
  * we use buf[2048-4097] for storing result.
  */
+/*
 static
 int finish_histogram_old(char* buf, size_t num_pages)
 {
@@ -375,6 +378,7 @@ int finish_histogram_old(char* buf, size_t num_pages)
     
     return 1;
 }
+*/
 
 void dump_histogram_log2(const struct histogram_log2* bin)
 {
@@ -386,22 +390,24 @@ void dump_histogram_log2(const struct histogram_log2* bin)
     printf("[2^22, inf) nsec : %d\n", bin->bucket[15]);
 }
 
+/*
 static
 void histogram_report_old(char* buf)
 {
     struct histo_result* result = (struct histo_result*)(buf + 2048);
     printf("# Latency frequency histogram\n");
     dump_histogram_log2(&result->sum);
-    /*
-    printf("[0, 2^8) nsec : %d\n", result->sum.bucket[0]);
-    for (i = 1; i < 15; ++i) {
-	printf("[2^%d, 2^%d) nsec : %d\n", i + 7, i + 8, result->sum.bucket[i]);
-    }
-    printf("[2^22, inf) nsec : %d\n", result->sum.bucket[15]);
+    
+    //printf("[0, 2^8) nsec : %d\n", result->sum.bucket[0]);
+    //for (i = 1; i < 15; ++i) {
+	//printf("[2^%d, 2^%d) nsec : %d\n", i + 7, i + 8, result->sum.bucket[i]);
+    //}
+    //printf("[2^22, inf) nsec : %d\n", result->sum.bucket[15]);
     //printf("%s: Nothing to report\n", __func__);
-    */
+    
     return;
 }
+*/
 
 void
 test_histo_calculation(void)

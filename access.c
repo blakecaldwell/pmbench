@@ -42,18 +42,18 @@
 static inline
 void atomic_inc(uint64_t *pval) { //changed from unsigned
     asm volatile (
-	"lock; incl %0" 
-	: "=m"(*(volatile unsigned*)pval)
-	: "m"(*(volatile unsigned*)pval)
+	"lock; incq %0" 
+	: "=m"(*(volatile uint64_t *)pval)
+	: "m"(*(volatile uint64_t *)pval)
     );
 }
 
 static inline
 void atomic_dec(uint64_t *pval) {
     asm volatile (
-	"lock; decl %0" 
-	: "=m"(*(volatile unsigned*)pval)
-	: "m"(*(volatile unsigned*)pval)
+	"lock; decq %0" 
+	: "=m"(*(volatile uint64_t *)pval)
+	: "m"(*(volatile uint64_t *)pval)
     );
 }
 
@@ -87,47 +87,52 @@ struct histogram_64 { struct histogram_sub_64 buckets[32]; } __attribute__((pack
 
 extern const struct sys_timestamp* get_tsops(void);
 
-_code int read_access_histogram(char* buf, size_t pfn, unsigned int offset)
+_code uint32_t read_access_histogram(uint32_t *ptr)
 {
-	static volatile int _val_sink = 0;
+	static volatile uint32_t _val_sink = 0;
 	//volatile register int _val_sink = 0;
-	int *ptr = (int*)(buf + (pfn << PAGE_SHIFT) + (offset >> 22) * 4); //access address = ( base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
-	//printf("\tPage:\t%d\t\tOffset:\t%04x\n", (int) pfn, offset >> 22);
     struct stopwatch swr;
     sw_reset(&swr, get_tsops());
     sw_start(&swr);
-    asm volatile (		//"nop\n\t"
-    							//"mfence \n\t"
-    							"mov %1, %0" //\n\t"
-    							//"nop"
-    						: 	"=r" (_val_sink)
-							: 	"m" (*ptr) );
-							//:	"memory");    	//_val_sink = *ptr;
+   asm volatile 
+   (
+   		//"nop\n\t"
+    		//"mfence \n\t"
+    		"mov %1, %0" //\n\t"
+    		//"nop"
+    	: 	"=r" (_val_sink)
+		: 	"m" (*ptr)
+		//:	"memory"    	
+	);
+	//_val_sink = *ptr;
     sw_stop(&swr);
     return sw_get_nsec(&swr); //_val_sink;
 }
 
-_code int write_access_histogram(char* buf, size_t pfn, unsigned int offset)
+_code uint32_t write_access_histogram(uint32_t *ptr)
 {
-	volatile register int _val_sink = 0;
-	int *ptr = (int*)(buf + (pfn << PAGE_SHIFT) + (offset >> 22) * 4);
+	volatile register uint32_t _val_sink = (uint32_t)ptr; //0;
     struct stopwatch sww;
     sw_reset(&sww, get_tsops());
     sw_start(&sww);
-    asm volatile ( 		//"nop\n\t"
-    							//"mfence \n\t"
-    							"mov %1, %0" //\n\t"
-								//"nop"
-           				: 	"=m" (*ptr)
-       					: 	"r" (_val_sink) );
-							//:	"memory");    	//*ptr = _val_sink;
+   asm volatile
+   (
+   		//"nop\n\t"
+   		//"mfence \n\t"
+   		"mov %1, %0" //\n\t"
+			//"nop"
+   	: 	"=m" (*ptr)
+   	: 	"r" (_val_sink)
+		//:	"memory"
+	);
+	//*ptr = _val_sink;
     sw_stop(&sww);
     return sw_get_nsec(&sww);
 }
 
-_code int record_touch_dummy(char *a, unsigned int b) { return 1; }
+_code void record_touch_dummy(char *a, uint32_t b) {}
 
-_code int record_histogram(char *stats, unsigned int elapsed_nsec)
+_code void record_histogram(char *stats, uint32_t elapsed_nsec)
 {
 	/*histo = (struct histogram_log2_sub*)(buf + (pfn << PAGE_SHIFT));
     	elapsed_nsec = sw_get_nsec(&sw);
@@ -156,9 +161,10 @@ _code int record_histogram(char *stats, unsigned int elapsed_nsec)
 	struct histogram_sub_64* histo = (struct histogram_sub_64*)(stats); //this should be pointing to the thread's read/write histogram page
 	uint64_t *pcounter; //changed from u32
 	if (elapsed_nsec < (1 << 8)) { pcounter = &(histo[0].hex[0]); }
+	//else if (elapsed_nsec >= (1 << 30)) { pcounter = &(histo[0].hex[15]); }
 	else
 	{
-		int index = ilog2(elapsed_nsec) - 7;
+		uint32_t index = ilog2(elapsed_nsec) - 7;
 		if (index < 16)
 		{
 			int sub_index = (~(1u << (index + 7)) & elapsed_nsec) >> (index + 7 - 4);
@@ -168,7 +174,6 @@ _code int record_histogram(char *stats, unsigned int elapsed_nsec)
 		else { pcounter = &(histo[0].hex[8 + index - 16]); }
 	}
 	atomic_inc(pcounter);
-	return 1;
 }
 
 static int finish_histogram(char *stats, size_t index, int ratio)
@@ -243,7 +248,7 @@ static void histogram_report(char* buf, int ratio)
 }
 
 access_fn_set touch_access = {
-    .warmup = NULL, //touch_only,
+    //.warmup = NULL, //touch_only,
     .exercise_read = read_access_histogram, 	//should this be an edited version without the stopwatch?
 	.exercise_write = write_access_histogram,
 	.record = record_touch_dummy,
@@ -254,7 +259,7 @@ access_fn_set touch_access = {
 };
 
 access_fn_set histogram_access = {
-    .warmup = NULL, //touch_only,
+    //.warmup = NULL, //touch_only,
     .exercise_read = read_access_histogram,
 	.exercise_write = write_access_histogram,
 	.record = record_histogram,

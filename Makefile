@@ -71,15 +71,19 @@ LFLAGS_WIN += -lpthread
 #LFLAGS_WIN += ../xalloc/xalloc.dll 
 #-save-temps
 
-CFLAGS_WIN += -I/usr/include/libxml2
 LFLAGS_WIN += $(LIBPATH_WINARGP)/argp.dll
+
+# libxml2
+CFLAGS_WIN += -DPMB_XML=1 -I/usr/include/libxml2
+CFLAGS_LINUX += -DPMB_XML=1 -I/usr/include/libxml2
+LXML := -lxml2
 
 .PHONY: all clean dist dist_src dist_bin dist_bin32 dist_bin64 dist_doc check help
 
 all: pmbench pmbench.exe
 
-pmbench: pmbench.o pattern.o system.o access.o debug.o
-	$(CC) $+ -lm -luuid -lxml2 -o $@ $(LFLAGS_LINUX)
+pmbench: pmbench.o pattern.o system.o access.o
+	$(CC) $+ -lm -luuid $(LXML) -o $@ $(LFLAGS_LINUX)
 	objdump -M intel -d $@ > $@.dmp
 
 
@@ -153,15 +157,15 @@ dist_src:
 	$(CC) -c $(CFLAGS) $(CFLAGS_LINUX) -o $@ $<
 
 
-pmbench.exe: pmbench.obj pattern.obj system.obj access.obj debug.obj 
-	$(WCC) $+ -lm -lrpcrt4 -lxml2 -o $@ $(LFLAGS_WIN) 
-
+pmbench.exe: pmbench.obj pattern.obj system.obj access.obj
+	$(WCC) $+ -lm -lrpcrt4 $(LXML) -o $@ $(LFLAGS_WIN) 
+	objdump -M intel -d $@ > $@.dmp
 
 %.obj: %.c
-	$(WCC) -c $(CFLAGS) $(CFLAGS_WIN) -o $@ $< -lxml2
+	$(WCC) -c $(CFLAGS) $(CFLAGS_WIN) -o $@ $< $(LXML)
 
 
-.depend:  pmbench.c pattern.c system.c access.c debug.c
+.depend:  pmbench.c pattern.c system.c access.c
 	@gcc -MM $(CFLAGS) $^ > $@
 
 -include .depend

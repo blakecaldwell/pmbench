@@ -53,7 +53,7 @@
 #define SYS_RAND_MAX 2147483647
 
 static inline
-long int sys_random(void) {
+int64_t sys_random(void) {
 	return rand();
 }
 
@@ -72,20 +72,20 @@ uint32_t dk_random_next(uint64_t* state) {
     (*state) = (*state) * 6364136223846793005ull + 1442695040888963407ull;
     return ((*state) >> 33);
 }
+static _code uint32_t dk_random_offset(uint64_t *state) { return dk_random_next(state) >> 21; }
+static _code uint32_t static_offset(uint64_t *i) { return (uint32_t)(*i); }
 
 struct sys_random_state {
     uint64_t dkstate;
-    uint64_t dummy;
 };
 
 static inline
-void sys_random_init(struct sys_random_state* s, unsigned int seed) {
+void sys_random_init(struct sys_random_state* s, uint32_t seed) {
 	s->dkstate = (uint64_t)seed;
 }
 
 static inline
-long int sys_random_r(struct sys_random_state* s) {
-	return (long int)dk_random_next(&s->dkstate);
+size_t sys_random_r(struct sys_random_state* s) { return (size_t)dk_random_next(&s->dkstate);
 }
 
 /*
@@ -94,14 +94,13 @@ long int sys_random_r(struct sys_random_state* s) {
  *   0 3 6 9 1 4 7 2 5 8 0 3 6 9 1 4 7 2 5 8 0 3 ...
  */
 typedef struct linear_context {
-    long i;
+    size_t i, n;
     int phase;
-    long n;
     int s;
 } linear_context;
 
 static
-void* linear_alloc_pattern_fn(long size, fp_t s, unsigned int random_seed)
+void * linear_alloc_pattern_fn(size_t size, fp_t s, uint32_t random_seed)
 {
     linear_context* ctx = malloc(sizeof(linear_context));
     if (!ctx) return NULL;
@@ -114,10 +113,10 @@ void* linear_alloc_pattern_fn(long size, fp_t s, unsigned int random_seed)
 
 static
 _code
-long linear_get_number(void* ctx_)
+size_t linear_get_number(void *ctx_)
 {
     linear_context* ctx = ctx_;
-    long val = ctx->i;
+    size_t val = ctx->i;
     ctx->i += ctx->s;
     if (__builtin_expect(ctx->i >= ctx->n, 0)) {
 	ctx->phase++;
@@ -130,7 +129,7 @@ long linear_get_number(void* ctx_)
 }
 
 static
-long linear_get_warmup_run(void* ctx_)
+size_t linear_get_warmup_run(void *ctx_)
 {
     linear_context* ctx = ctx_;
     return ctx->n;
@@ -157,11 +156,11 @@ pattern_generator linear_pattern = {
  */
 typedef struct uniform_context {
     struct sys_random_state rstate;
-    long n;
+    size_t n;
 } uniform_context;
 
 static
-void* uniform_alloc_pattern_fn(long size, fp_t dummy1, unsigned int random_seed)
+void * uniform_alloc_pattern_fn(size_t size, fp_t dummy1, uint32_t random_seed)
 {
     uniform_context* ctx = malloc(sizeof(uniform_context));
     if (!ctx) return NULL;
@@ -173,7 +172,7 @@ void* uniform_alloc_pattern_fn(long size, fp_t dummy1, unsigned int random_seed)
 
 static
 _code
-long uniform_get_number(void* ctx_)
+size_t uniform_get_number(void *ctx_)
 {
     uniform_context* ctx = ctx_;   
     return sys_random_r(&ctx->rstate) % ctx->n;
@@ -185,7 +184,7 @@ long uniform_get_number(void* ctx_)
  * large amount of pages)
  */
 static
-long uniform_get_warmup_run(void* ctx_)
+size_t uniform_get_warmup_run(void *ctx_)
 {
     uniform_context* ctx = ctx_;
     return 4 * ctx->n;
@@ -231,10 +230,10 @@ extern pattern_generator uniform_pattern;
 
 typedef struct normal_ih_context {
     struct sys_random_state rstate;
-    long n;	 // calculated n (must be 12*stdev)
-    long stdev;	 // calculated stdev
+    size_t n;	 // calculated n (must be 12*stdev)
+    size_t stdev;	 // calculated stdev
     int shift;   // calculated shift (n_user - n)
-    long n_user; // support [0, n_user]
+    size_t n_user; // support [0, n_user]
 } normal_ih_context;
 
 /* setup parameter normal with support range [0, size-1], 
@@ -244,7 +243,7 @@ typedef struct normal_ih_context {
  */
 
 static
-void* normal_ih_alloc_pattern_fn(long size, fp_t param1, unsigned int random_seed)
+void * normal_ih_alloc_pattern_fn(size_t size, fp_t param1, uint32_t random_seed)
 {
     normal_ih_context* ctx = malloc(sizeof(normal_ih_context));
     static const int ORDER = 12;
@@ -262,11 +261,11 @@ void* normal_ih_alloc_pattern_fn(long size, fp_t param1, unsigned int random_see
 
 static
 _code
-long normal_ih_get_number(void* ctx_)
+size_t normal_ih_get_number(void *ctx_)
 {
     normal_ih_context* ctx = ctx_;   
     static const int ORDER = 12;
-    long sum;
+    size_t sum;
     int i;
     int n = (int)ctx->n;
 retry:
@@ -287,14 +286,14 @@ retry:
     sum = sum / ORDER;
     sum += ctx->shift;
     if (__builtin_expect((sum > ctx->n_user || sum < 0), 0)) goto retry;
-    return (long)sum;
+    return (size_t)sum;
 }
 
 /*
  * we just use n_user.
  */
 static
-long normal_ih_get_warmup_run(void* ctx_)
+size_t normal_ih_get_warmup_run(void *ctx_)
 {
     normal_ih_context* ctx = ctx_;
     return ctx->n_user;
@@ -315,13 +314,12 @@ pattern_generator normal_ih_pattern =
  */
 typedef struct normal_context {
     struct sys_random_state rstate;
-    long n;
+    size_t n, save;
     int stdev;
-    long save;
 } normal_context;
 
 static
-void* normal_alloc_pattern_fn(long size, fp_t param1, unsigned int random_seed)
+void* normal_alloc_pattern_fn(size_t size, fp_t param1, uint32_t random_seed)
 {
     normal_context* ctx = malloc(sizeof(normal_context));
     if (!ctx) return NULL;
@@ -334,11 +332,11 @@ void* normal_alloc_pattern_fn(long size, fp_t param1, unsigned int random_seed)
 
 static
 _code
-long normal_get_number(void* ctx_)
+size_t normal_get_number(void *ctx_)
 {
     normal_context* ctx = ctx_;   
 
-    long res1, res2;
+    size_t res1, res2;
     fp_t u1, u2, x1, x2, w, y1, y2;
 
     if (ctx->save != -1) {
@@ -378,7 +376,7 @@ long normal_get_number(void* ctx_)
  * we just use n.
  */
 static
-long normal_get_warmup_run(void* ctx_)
+size_t normal_get_warmup_run(void *ctx_)
 {
     normal_context* ctx = ctx_;
     return ctx->n;
@@ -407,7 +405,7 @@ typedef struct pareto_context {
 } pareto_context;
 
 static
-void* pareto_alloc_pattern_fn(long size, fp_t a, unsigned int random_seed)
+void* pareto_alloc_pattern_fn(size_t size, fp_t a, uint32_t random_seed)
 {
     pareto_context* ctx = malloc(sizeof(pareto_context));
     if (!ctx) return NULL;
@@ -428,7 +426,7 @@ void* pareto_alloc_pattern_fn(long size, fp_t a, unsigned int random_seed)
  */
 static
 _code
-long pareto_get_number(void* ctx_)
+size_t pareto_get_number(void *ctx_)
 {
     pareto_context* ctx = ctx_;
 
@@ -438,17 +436,17 @@ long pareto_get_number(void* ctx_)
     u = (fp_t)((sys_random_r(&ctx->rstate) % SYS_RAND_MAX -1) + 1) / SYS_RAND_MAX;
     val = 1.0 - u * ctx->_rep1;
     val = ctx->l * pow(val, ctx->_rep2);
-    return (long)val - 1;
+    return (size_t)val - 1;
 }
 
 /*
  * we use n * 8 (arbitrarily chosen).
  */
 static
-long pareto_get_warmup_run(void* ctx_)
+size_t pareto_get_warmup_run(void *ctx_)
 {
     pareto_context* ctx = ctx_;
-    return (long)ctx->h * 8;
+    return (size_t)ctx->h * 8;
 }
 
 pattern_generator pareto_pattern = 
@@ -489,4 +487,14 @@ pattern_generator* get_pattern_from_name(const char* str)
 	i++;
     }
     return NULL;
+}
+
+extern get_pattern_fn get_offset_function(int n)
+{
+	if (n >= 0) { return &static_offset; }
+	switch (n)
+	{
+		case (-1): 	return &dk_random_offset; //other negative numbers could be passed here to select an offset pattern
+		default: 	return &dk_random_offset;
+	}
 }

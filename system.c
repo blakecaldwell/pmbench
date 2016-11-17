@@ -35,6 +35,7 @@
 #include <string.h>
 #include <math.h>
 #include <inttypes.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <memory.h>
@@ -61,10 +62,9 @@
  * for leaf with ecx subleaf, this structure only caches ECX=0 leaf. 
  */
 struct cpuid_struct {
-    unsigned leaf_pop;
-    unsigned leaf_ex_pop;
+    uint32_t leaf_pop, leaf_ex_pop;
     struct {
-	unsigned r[4];
+    	uint32_t r[4];
     } leaf[16], leaf_ex[10];
 }; 
 
@@ -74,12 +74,11 @@ static struct cpuid_struct cpuid_local = {
 };
 
 
-static 
-void cpuid_populate_local_leaf(unsigned idx)
+static void cpuid_populate_local_leaf(uint32_t idx)
 {
     idx &= 0x0f;
     static const int A = 0, B = 1, C = 2, D = 3;
-    unsigned* r = cpuid_local.leaf[idx].r;
+    uint32_t *r = cpuid_local.leaf[idx].r;
 
     r[A] = idx;
     r[C] = 0;
@@ -88,9 +87,9 @@ void cpuid_populate_local_leaf(unsigned idx)
 }
 
 static inline
-int is_leaf_supported_idx(unsigned idx)
+int is_leaf_supported_idx(uint32_t idx)
 {
-    unsigned eax = idx & 0x0f;
+    uint32_t eax = idx & 0x0f;
 
     if (eax >= 0x0E) return 0;
     if (!(cpuid_local.leaf_pop & 0x01)) cpuid_populate_local_leaf(0);
@@ -100,11 +99,10 @@ int is_leaf_supported_idx(unsigned idx)
     return 1;
 }
 
-static 
-void cpuid_populate_local_leaf_ex(unsigned idx)
+static void cpuid_populate_local_leaf_ex(uint32_t idx)
 {
     static const int A = 0, B = 1, C = 2, D = 3;
-    unsigned* r = cpuid_local.leaf_ex[idx & 0x0f].r;
+    uint32_t *r = cpuid_local.leaf_ex[idx & 0x0f].r;
 
     r[A] = 0x80000000 | idx;
     r[C] = 0;
@@ -116,9 +114,9 @@ void cpuid_populate_local_leaf_ex(unsigned idx)
  * ex_idx can be either 0x800000idx or idx
  */
 static
-int is_leaf_ex_supported_idx(unsigned ex_idx)
+int is_leaf_ex_supported_idx(uint32_t ex_idx)
 {
-    unsigned eax = 0x80000000u | ex_idx;
+    uint32_t eax = 0x80000000u | ex_idx;
     ex_idx &= 0x0f; 
 
     if (eax >= 0x8000000A) return 0;
@@ -188,15 +186,15 @@ int __cpuid_obtain_model_string(char* buf)
 
 /* @output must be at least 16 bytes long */
 static inline 
-int __cpuid_cache_tlb_info(unsigned char* output)
+int __cpuid_cache_tlb_info(uint8_t *output)
 {
     static const int A = 0, B = 1, C = 2, D = 3;
-    unsigned r[4];
-    unsigned char* c;
-    unsigned char* save = output;
+    uint32_t r[4];
+    uint8_t *c;
+    uint8_t *save = output;
     int rep, i;
 
-    c = (unsigned char*)r;
+    c = (uint8_t *)r;
 
     r[A] = 2; r[C] = 0;
     _sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
@@ -217,7 +215,7 @@ int __cpuid_cache_tlb_info(unsigned char* output)
 
 /* these are not zero-based values */
 struct cpu_cache_info {
-    unsigned sets;
+    uint32_t sets;
     short linesize;
     short partitions;
     short ways;
@@ -243,7 +241,7 @@ static inline
 int __cpuid_deterministic_cache_info(struct cpu_cache_info* output, int size)
 {
     static const int A = 0, B = 1, C = 2, D = 3;
-    unsigned r[4];
+    uint32_t r[4];
     struct cpu_cache_info_ebx_encode* ebx_encode = (void*)&r[B];
 
     int item;
@@ -265,7 +263,7 @@ int __cpuid_deterministic_cache_info(struct cpu_cache_info* output, int size)
 
 
 /*****************************************************/
-unsigned char tlb_info_buf[16];
+uint8_t tlb_info_buf[16];
 int print_tlb_info()
 {
    int i, tlb_info_buf_len = __cpuid_cache_tlb_info(tlb_info_buf);
@@ -279,12 +277,12 @@ int print_tlb_info()
 	}
 	return tlb_info_buf_len;
 }
-unsigned char get_tlb_info(int i) { return tlb_info_buf[i]; } //also need something for the switch statement
+uint8_t get_tlb_info(int i) { return tlb_info_buf[i]; } //also need something for the switch statement
 
 struct cpu_cache_info cash[8];
 int print_cache_info(int len)
 {
-	unsigned capacity;
+	uint32_t capacity;
    int i, deterministic = 0;
    
    //len = __cpuid_cache_tlb_info(buf);
@@ -369,13 +367,11 @@ int get_cache_info(int i, int m)
  * then b = (x2*y1)/(x2-x1) - (x1*y2)/(x2-x1)
  */
 static
-unsigned measure_rdtsc_frequency(void)
+uint32_t measure_rdtsc_frequency(void)
 {
-    unsigned long long tscA, tscB;
-    unsigned long long y1, y2, offset;
-    unsigned ret, rdtsc_freq_measured;
+    uint64_t tscA, tscB, y1, y2, offset;
+    uint32_t ret, rdtsc_freq_measured;
     static const int x1 = 128, x2 = 256; // ~ms
-
     tscA = rdtsc();
     ret = usleep(x1*1024);
     tscB = rdtsc();
@@ -384,7 +380,7 @@ unsigned measure_rdtsc_frequency(void)
 	return 0;
     }
     y1 = tscB - tscA;
-    rdtsc_freq_measured = (unsigned)((y1*1000ull)/(x1*1024));
+    rdtsc_freq_measured = (uint32_t)((y1*1000ull)/(x1*1024));
     tscA = rdtsc();
     ret = usleep(x2*1024);
     tscB = rdtsc();
@@ -394,9 +390,8 @@ unsigned measure_rdtsc_frequency(void)
     }
     y2 = tscB - tscA;
     offset = ((y1*x2) - (y2*x1))/(x2-x1);
-    rdtsc_freq_measured = (unsigned)(((y1 - offset)*1000ull)/(x1*1024));
+    rdtsc_freq_measured = (uint32_t)(((y1 - offset)*1000ull)/(x1*1024));
 //printf("rdtsc_freq_measured: %d, offset: %lld\n", rdtsc_freq_measured, offset);
-
     return rdtsc_freq_measured;
 }
 
@@ -412,10 +407,10 @@ unsigned measure_rdtsc_frequency(void)
    end = perfCount.QuadPart;
    elapsed = (double)(end - start) / frequency.QuadPart;
   */
-unsigned get_cycle_freq(void)
+uint32_t get_cycle_freq(void)
 {
     LARGE_INTEGER i;
-    unsigned rdtsc_khz;
+    uint32_t rdtsc_khz;
 
     /* Note on QueryPerformanceFrequency():
      * This function will usually return TSC counter frequency.
@@ -444,19 +439,18 @@ unsigned get_cycle_freq(void)
 	printf("rdtsc frequency at %dKHZ\n", rdtsc_khz);
 	return rdtsc_khz;
     } else {
-	return (unsigned)(i.QuadPart);   // perfFreq in Hz
+	return (uint32_t)(i.QuadPart);   // perfFreq in Hz
     }
 }
 #else
-unsigned get_cycle_freq(void)
+uint32_t get_cycle_freq(void)
 {
     /* methodology 1: grep for 'cpu MHz' line in /proc/cpuinfo */
     FILE* fp;
     static char buf[512];
     char* cursor;
     float cpumhz;
-    unsigned cpu_freq_reported;
-    unsigned rdtsc_freq_measured;
+    uint32_t cpu_freq_reported, rdtsc_freq_measured;
 
     fp = fopen("/proc/cpuinfo", "r");
     if (!fp) {
@@ -468,7 +462,7 @@ unsigned get_cycle_freq(void)
     cursor = strstr(buf, "cpu MHz");
     cursor += 11; // consume "cpu MHz \t: "
     sscanf(cursor, "%f", &cpumhz);
-    cpu_freq_reported = (unsigned)(cpumhz * 1000.0f);
+    cpu_freq_reported = (uint32_t)(cpumhz * 1000.0f);
 
     if (cpu_freq_reported < 500000 || cpu_freq_reported > 5000000) {
 	printf("CPU frequency detection failed. Bailing out\n");
@@ -489,7 +483,7 @@ unsigned get_cycle_freq(void)
 
 static
 _code
-unsigned long long _ops_rdtsc(void) 
+uint64_t _ops_rdtsc(void)
 {
     return rdtsc();
 }
@@ -499,7 +493,7 @@ unsigned long long _ops_rdtsc(void)
  */
 int _ops_rdtsc_init_base_freq(struct sys_timestamp* sts)
 {
-    unsigned freq_khz = measure_rdtsc_frequency();
+    uint32_t freq_khz = measure_rdtsc_frequency();
     if (!freq_khz) return -1;
     sts->base_freq_khz = freq_khz;
     return 0;
@@ -515,7 +509,7 @@ struct sys_timestamp rdtsc_ops = {
 
 static
 _code
-unsigned long long _ops_rdtscp(void)
+uint64_t _ops_rdtscp(void)
 {
     return rdtscp();
 }
@@ -525,7 +519,7 @@ unsigned long long _ops_rdtscp(void)
  */
 int _ops_rdtscp_init_base_freq(struct sys_timestamp* sts)
 {
-    unsigned freq_khz = measure_rdtsc_frequency();
+    uint32_t freq_khz = measure_rdtsc_frequency();
     if (!freq_khz) return -1;
     sts->base_freq_khz = freq_khz;
     return 0;
@@ -540,7 +534,7 @@ struct sys_timestamp rdtscp_ops = {
 };
 
 #ifdef _WIN32
-unsigned long long _ops_perfc(void)
+uint64_t _ops_perfc(void)
 {
     LARGE_INTEGER counter;
     QueryPerformanceCounter(&counter);
@@ -564,16 +558,22 @@ struct sys_timestamp perfc_ops = {
 };
 #else 
 // XXX for now perfc_ops is identical to rdtsc_ops
+/*
 struct sys_timestamp perfc_ops = {
     .timestamp = _ops_rdtsc,
     .init_base_freq = _ops_rdtsc_init_base_freq,
     .base_freq_khz = 0,
     .name = "perfc",
 };
+*/
 #endif
 
 static struct sys_timestamp* all_sys_timestamp[] = {
-    &rdtsc_ops, &rdtscp_ops, &perfc_ops, 0
+	&rdtsc_ops, &rdtscp_ops, 
+#ifdef _WIN32
+	&perfc_ops, 
+#endif
+   0
 };
 
 struct sys_timestamp* get_timestamp_from_name(const char* str)
@@ -647,7 +647,7 @@ int64_t sys_stat_mem_get(const sys_mem_item *info, int i)
 		case (3): return stat->ullAvailPageFile/1000;
 		case (4): return stat->ullAvailVirtual/1000;
 		default:
-			printf("(sys_stat_mem_get(%d)) Error\n", i);
+			printf("sys_stat_mem_get(%p, %d): Error\n", info, i);
 			return 0;
 	}
 }
@@ -659,11 +659,11 @@ sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* after)
     const MEMORYSTATUSEX* stat_b = &before->memstatex;
     const MEMORYSTATUSEX* stat_a = &after->memstatex;
 	printf("%8"PRId64" %8"PRId32" %10"PRId64" %13"PRId64" %12"PRId64"\n",
-	    (long long)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000, 
+	    (int64_t)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000, 
 	    (int)(stat_a->dwMemoryLoad - stat_b->dwMemoryLoad), 
-	    (long long)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000, 
-	    (long long)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000, 
-            (long long)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000); 
+	    (int64_t)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000, 
+	    (int64_t)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000, 
+            (int64_t)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000); 
 }
 
 int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i)
@@ -672,13 +672,13 @@ int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* a
 	const MEMORYSTATUSEX* stat_a = &after->memstatex;
 	switch (i)
 	{
-		case (0): return (long long)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000;
+		case (0): return (int64_t)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000;
 	   case (1): return (int)(stat_a->dwMemoryLoad - stat_b->dwMemoryLoad);
-	   case (2): return (long long)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000;
-	   case (3): return (long long)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000;
-      case (4): return (long long)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000;
+	   case (2): return (int64_t)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000;
+	   case (3): return (int64_t)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000;
+      case (4): return (int64_t)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000;
       default:
-      	printf("sys_stat_mem_get_delta(%d): Error\n", i);
+      	printf("sys_stat_mem_get_delta(%p, %p, %d): Error\n", before, after, i);
          return 0;
 	}
 }
@@ -768,7 +768,7 @@ void sys_stat_mem_print_header(void)
 
 void sys_stat_mem_print(const sys_mem_item* info)
 {
-	printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
+	printf("%8d %8d %8d %8d %8d %9"PRId64" %9"PRId64" %9"PRId64" %9"PRId64" %9"PRId64"\n",
 		    info->free_kib, info->buffer_kib,
 		    info->cache_kib, info->active_kib, info->inactive_kib,
 		    info->pgpgin, info->pgpgout, info->pswpin,
@@ -790,7 +790,7 @@ int64_t sys_stat_mem_get(const sys_mem_item *info, int i)
 		case (8): return info->pswpout;
 		case (9): return info->pgmajfault;
 		default:
-			printf("(sys_stat_mem_get(*info, %d) Error\n", i);
+			printf("sys_stat_mem_get(%p, %d) Error\n", info, i);
 			return 0;
 	}
 }
@@ -810,7 +810,7 @@ int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* a
 		case (8): return after->pswpout - before->pswpout;
 		case (9): return after->pgmajfault - before->pgmajfault;
 		default:
-			printf("(sys_stat_mem_get_delta(%d) Error\n", i);
+			printf("sys_stat_mem_get_delta(%p, %p, %d): Error\n", before, after, i);
 			return 0;
 	}
 }
@@ -818,7 +818,7 @@ int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* a
 void sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* after)
 {
 	
-	printf("%8d %8d %8d %8d %8d %9lld %9lld %9lld %9lld %9lld\n",
+	printf("%8d %8d %8d %8d %8d %9"PRId64" %9"PRId64" %9"PRId64" %9"PRId64" %9"PRId64"\n",
 		    after->free_kib - before->free_kib, after->buffer_kib - before->buffer_kib,
 		    after->cache_kib - before->cache_kib, after->active_kib - before->active_kib,
 		    after->inactive_kib - before->inactive_kib,
@@ -850,7 +850,7 @@ char * sys_print_hostname()
    else printf("Hostname       : %s\n", infBuf);
 	return infBuf;
 }
-int sys_get_os_version(int i)
+int sys_get_os_version_value(int i)
 {
 	switch (i)
 	{
@@ -893,7 +893,7 @@ int sys_print_time_info()
    printf("Reported on    : %s %s %s\n", date_strbuf, time_strbuf, year_strbuf);
    return 1;
 }
-char * sys_get_time_info(int i)
+char * sys_get_time_info_string(int i)
 {
 	if (!getDateFormat_ret) return "unavailable";
 	switch (i)
@@ -902,14 +902,14 @@ char * sys_get_time_info(int i)
 		case (10): return time_strbuf;
 		case (5): return year_strbuf;
 		default:
-			printf("sys_get_time_info(%d): Error\n", i);
+			printf("sys_get_time_info_string(%d) Error\n", i);
 			return "error";
 	}
 }
 
 char * sys_print_uuid()
 {
-	unsigned char* rpc_str;
+	uint8_t *rpc_str;
    UUID uu;
    RPC_STATUS rpc_ret;
    rpc_ret = UuidCreate(&uu);
@@ -938,7 +938,7 @@ char * sys_print_hostname()
    }
    return uname_buf.nodename;
 }
-char * sys_get_os_version(int i)
+char * sys_get_os_version_string(int i)
 {
 	switch (i)
 	{
@@ -959,7 +959,7 @@ int sys_print_time_info()
    timestamp_time = *gmtime(&t);
    return 1;
 }
-int sys_get_time_info(int i)
+int sys_get_time_info_value(int i)
 {
 	switch (i)
 	{
@@ -972,7 +972,9 @@ int sys_get_time_info(int i)
 		case (6): return timestamp_time.tm_wday;
 		case (7): return timestamp_time.tm_yday;
 		case (8): return timestamp_time.tm_isdst;
-		default: return 0;
+		default:
+			printf("sys_get_time_info_value(%d): Error\n", i);
+			return 0;
 	}
 }
 

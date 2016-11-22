@@ -115,6 +115,7 @@ static struct argp_option options[] = {
     { "timestamp", 't', "TIMESTAMP", 0, "Specify TIMESTAMP. rdtsc, rdtscp(def), or perfc" },
 	{ "ratio", 'r', "RATIO", 0, "Percentage read/write ratio (0 = write only, 100 = read only; default 50)" }, //TODO: count # of reads/writes
 	{ "offset", 'o', "OFFSET", 0, "Specify static page access offset (default random)" },
+	{ "initialize", 'i', 0, OPTION_ARG_OPTIONAL, "Initialize memory map with garbage data" },
 #ifdef PMB_XML
 	{ "file", 'f', "FILE", 0, "Filename for XML output" },
 #endif
@@ -148,6 +149,7 @@ typedef struct parameters {
     int cold;		    						// don't perform warm up exercise before benchmark
     struct sys_timestamp* tsops; 				// timestamp ops (rdtsc_ops or perfc_ops)
     int jobs;		    											// number of worker threads
+    int init_garbage;
 #ifdef XALLOC
     int xalloc_mib;	    						// positive xalloc_mib indicates we use xalloc instead of mmap
     char* xalloc_path;	    					// xalloc backend file pathname
@@ -184,6 +186,7 @@ void set_default_params(parameters* p)
     p->cold = 0;
     p->tsops = &rdtscp_ops;
     p->jobs = 1;
+    p->init_garbage = 0;
 #ifdef XALLOC
     p->xalloc_mib = 0;
     p->xalloc_path = "/dev/ram0";
@@ -209,6 +212,7 @@ void print_params(const parameters* p)
 	printf("  duration_sec = %d\n", p->duration_sec);
    printf("  mapsize_mib  = %d\n", p->mapsize_mib);
    printf("  setsize_mib  = %d\n", p->setsize_mib);
+   printf("  initialize   = %d\n", p->init_garbage);
    printf("  shape        = %f\n", p->shape);
    printf("  delay        = %d\n", p->delay);
    printf("  quiet        = %d\n", p->quiet);
@@ -261,6 +265,7 @@ xmlNodePtr makeParamsNode(const parameters *p, xmlNodePtr signaturenode)
 		xmlNewChild(paramsnode, NULL, BAD_CAST "duration", unsignedIntToXmlChar(p->duration_sec));
 		xmlNewChild(paramsnode, NULL, BAD_CAST "mapsize", unsignedIntToXmlChar(p->mapsize_mib));
 		xmlNewChild(paramsnode, NULL, BAD_CAST "setsize", unsignedIntToXmlChar(p->setsize_mib));
+		xmlNewChild(paramsnode, NULL, BAD_CAST "initialize", signedIntToXmlChar(p->init_garbage));
 		xmlNewChild(paramsnode, NULL, BAD_CAST "shape", floatToXmlChar(p->shape));
 		xmlNewChild(paramsnode, NULL, BAD_CAST "delay", unsignedIntToXmlChar(p->delay));
 		xmlNewChild(paramsnode, NULL, BAD_CAST "quiet", unsignedIntToXmlChar(p->quiet));
@@ -294,6 +299,9 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     	break;
     case 's':
     	if (arg) param->setsize_mib = atoi(arg);
+    	break;
+    case 'i':
+    	param->init_garbage = 1;
     	break;
 #ifdef PMB_THREAD
     case 'j':
@@ -1134,21 +1142,6 @@ void* main_bm_thread(void* arg)
 	    }
 	    if (p->delay > 10) sys_delay(p->delay);
 	}
-/*
-		//XXX fill in garbage to beat compression/dedup
-		{
-			int i, j;
-			uint32_t val;
-			uint64_t garbage = 0x0ddfadedbeefd00d;
-			for (i = 0; i < num_pages; i++) {
-				for (j = 0; j < PAGE_SIZE; j+=4) {
-					garbage = garbage * 6364136223846793005ull + 1442695040888963407ull;
-					val = (uint32_t)(garbage >> 32);
-					buf[i*PAGE_SIZE + j] = val;
-				}
-			}
-		}
-*/
 	sw_stop(&sw);
 
 	presult->total_warmup_clock = sw.elapsed_sum;
@@ -1499,7 +1492,6 @@ int main(int argc, char** argv)
     } else {
 #endif
 #ifdef _WIN32
-	if (params.cold) prn("WARNING: Windows 10 is known to give inaccurate results if memory compression is enabled and the map is uninitialized.\n");
 	buf = VirtualAlloc(NULL, map_num_pfn * PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	if (buf == NULL) {
 	    ret = GetLastError();
@@ -1554,23 +1546,31 @@ int main(int argc, char** argv)
 	    return 1;
 	}
 #endif
-//if (!params.cold)
-//{
 	//XXX fill in garbage to beat compression/dedup
+	if (params.init_garbage)
 	{
-	    int i, j;
-	    uint64_t state = 0xdeadbeefdeadbeef;
-	    uint32_t val;
-	    for (i = 0; i < map_num_pfn; i++) {
-		for (j = 0; j < PAGE_SIZE; j+=4) {
-		    //dk prng
-		    state = state * 6364136223846793005ull + 1442695040888963407ull;
-		    val = (uint32_t)(state >> 33);
-		    buf[i*PAGE_SIZE + j] = val;
+		prn("Initializing memory map...\n");
+		int i, j;
+		uint64_t state = 0x0ddfadedbeefd00d;
+		uint32_t val;
+		struct stopwatch sw_init;
+		sw_reset(&sw_init, params.tsops);
+		sw_start(&sw_init);
+		for (i = 0; i < map_num_pfn; i++) 
+		{
+			for (j = 0; j < PAGE_SIZE; j+=4) 
+			{
+				state = state * 6364136223846793005ull + 1442695040888963407ull;
+				val = (uint32_t)(state >> 33);
+				buf[i*PAGE_SIZE + j] = val;
+			}
 		}
-	    }
+		sw_stop(&sw_init);
+		prn("Initialization took %0.4f ms\n", ((float)sw_get_usec(&sw_init))/1000.0);
 	}
-//}
+#ifdef _WIN32
+	else prn("WARNING: Windows 10's memory compression is known to produce inaccurate results without initialization.\n");
+#endif
 #ifdef XALLOC
     }
 #endif

@@ -57,4 +57,5 @@ extern pattern_generator* get_pattern_from_name(const char* str);
 
 typedef uint32_t (*get_pattern_fn)(uint64_t *); //extern uint32_t (*get_offset_function(int n))(uint64_t *);
 extern get_pattern_fn get_offset_function(int n);
+extern get_pattern_fn get_accesstype_function(int n);
 #endif

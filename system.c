@@ -857,7 +857,9 @@ int sys_get_os_version_value(int i)
 		case 1: return (int)(LOBYTE(LOWORD(os_version)));
 		case 2: return (int)(HIBYTE(LOWORD(os_version)));
 		case 3:
-			if (os_version < 0x80000000) { return (int)(HIWORD(os_version)); }
+			if (os_version < 0x80000000) {
+				return (int)(HIWORD(os_version));
+			}
 			else return 0;
 		default: return 0;
 	}
@@ -885,11 +887,20 @@ int sys_print_time_info()
    SYSTEMTIME systime;
    GetLocalTime(&systime);
    getDateFormat_ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, "ddd MMM dd", date_strbuf, 64);
-	if (!getDateFormat_ret) { printf("date/time failed\n"); return 0; }
+	if (!getDateFormat_ret) {
+		printf("date/time failed\n");
+		return 0;
+	}
    getDateFormat_ret = GetDateFormat(LOCALE_INVARIANT, 0, &systime, "yyyy", year_strbuf, 8);
-   if (!getDateFormat_ret) { printf("date/time failed\n"); return 0; }
+   if (!getDateFormat_ret) {
+   	printf("date/time failed\n");
+   	return 0;
+   }
    getDateFormat_ret = GetTimeFormat(LOCALE_INVARIANT, TIME_FORCE24HOURFORMAT, &systime, NULL, time_strbuf, 64);
-   if (!getDateFormat_ret) { printf("date/time failed\n"); return 0; }
+   if (!getDateFormat_ret) {
+   	printf("date/time failed\n");
+   	return 0;
+   }
    printf("Reported on    : %s %s %s\n", date_strbuf, time_strbuf, year_strbuf);
    return 1;
 }

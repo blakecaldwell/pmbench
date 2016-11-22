@@ -66,7 +66,6 @@
 
 #ifdef PMB_THREAD
 #include <pthread.h>
-#include <semaphore.h>
 #endif
 
 #include "system.h"
@@ -347,12 +346,18 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
 		break;
     case 'r':
     	param->ratio = (arg ? atoi(arg) : 50);
-    	if (param->ratio < 0 || param->ratio > 100) { printf("read/write ratio out of bounds, must be from 0-100.\n");  exit(EXIT_FAILURE); }
-    	param->get_accesstype = get_offset_function(-1);
+    	if (param->ratio < 0 || param->ratio > 100) { 
+			printf("read/write ratio out of bounds, must be from 0-100.\n");
+			exit(EXIT_FAILURE);
+		}
+    	param->get_accesstype = get_accesstype_function(0);
     	break;
     case 'o':
     	param->offset = (arg ? atoi(arg) : -1);
-    	if (param->offset > 1023) { printf("page offset out of bounds, must be from 0-1023.\n"); exit(EXIT_FAILURE); }
+    	if (param->offset > 1023) { 
+    		printf("page offset out of bounds, must be from 0-1023.\n"); 
+    		exit(EXIT_FAILURE); 
+    	}
     	param->get_offset = get_offset_function(param->offset);
     	break;
 #ifdef PMB_XML
@@ -1040,18 +1045,11 @@ void thread_sync(int syncpoint) {
     return;
 }
 
-#ifdef PMB_THREAD
-sem_t finish_read, finish_write; //prevent race condition on access->finish
-#endif
-
-static inline uint32_t * get_access_address(char *buf, size_t pfn, uint32_t offset)
+static inline 
+uint32_t* get_access_address(char *buf, size_t pfn, uint32_t offset)
 {
-	return (uint32_t *)
-	(
-		buf 
-		+ (pfn << PAGE_SHIFT) 
-		+ (offset) * 4
-	); //access address = ( base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
+    return (uint32_t*) (buf + (pfn << PAGE_SHIFT) + (offset) * sizeof(uint32_t)); 
+    //access address = ( base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
 }
 
 /**
@@ -1071,7 +1069,7 @@ void* main_bm_thread(void* arg)
     int do_memstat = (tinfo->thread_num == 1);
 
     char* buf = control.buf;
-    char *stats = control.stats + ( (tinfo->thread_num - 1) * 4096); //worker thread numbers start at 1
+    char* stats = control.stats + ((tinfo->thread_num - 1) * 4096); //worker thread numbers start at 1
 
     struct bench_result* presult = &tinfo->result;
 
@@ -1104,67 +1102,64 @@ void* main_bm_thread(void* arg)
 
     /* do measure pattern generation overhead */
 
-	sw_start(&sw);
-	for (i = 0; i < iter_patternlap; ++i) {
-		pattern->get_next(ctx);
-	}
+    sw_start(&sw);
+    for (i = 0; i < iter_patternlap; ++i) {
+	pattern->get_next(ctx);
+    }
 
-	sw_stop(&sw);
+    sw_stop(&sw);
 
-	presult->total_numgen_clock = sw.elapsed_sum;
-	presult->total_numgen_count = iter_patternlap;
+    presult->total_numgen_clock = sw.elapsed_sum;
+    presult->total_numgen_count = iter_patternlap;
 
-	prn("[%d] Pattern generation overhead: %0.4f usec per drawing\n", tinfo->thread_num, (float)sw_get_usec(&sw)/iter_patternlap); // convert msec to usec
-	sw_reset(&sw, tsops);
+    prn("[%d] Pattern generation overhead: %0.4f usec per drawing\n", tinfo->thread_num, (float)sw_get_usec(&sw)/iter_patternlap); // convert msec to usec
+    sw_reset(&sw, tsops);
 
-	/* take memory information snapshot */
+    /* take memory information snapshot */
     if (do_memstat) sys_stat_mem_update(&mem_ctx, &mem_info_before_warmup);
 
     /* do warmup */
-	if (!p->cold) {
-		iter_warmup = pattern->get_warmup_run ?
-				pattern->get_warmup_run(ctx) : num_pages;
-		prn("[%d] Performing %ld page accesses for warmup\n", tinfo->thread_num, iter_warmup);
-		sw_start(&sw);
-		for (i = 0; i < iter_warmup; ++i) {
-			if ( (p->get_accesstype(&action_ctx) % 100) < p->ratio)	
-			{ 	
-				access->exercise_read	
-    			(
-    				get_access_address
-    				(
-    					buf, 
-    					pattern->get_next(ctx), 
-    					p->get_offset(&offset_ctx)
-    				)
-    			); 
-			}
-			else 																	
-			{ 	
-				access->exercise_write	
-    			(
-    				get_access_address
-    				(
-    					buf, 
-    					pattern->get_next(ctx), 
-    					p->get_offset(&offset_ctx)
-    				)	
-    			);
-			}
-			if (p->delay > 10) sys_delay(p->delay);
-		}
-
-		sw_stop(&sw);
-
-		presult->total_warmup_clock = sw.elapsed_sum;
-		presult->total_warmup_count = iter_warmup;
-
-		prn("[%d] Warmup done - took %d us\n", tinfo->thread_num, sw_get_usec(&sw));
-		sw_reset(&sw, tsops);
-
-		if (do_memstat) sys_stat_mem_update(&mem_ctx, &mem_info_before_run);
+    if (!p->cold) {
+	iter_warmup = pattern->get_warmup_run ?
+	    pattern->get_warmup_run(ctx) : num_pages;
+	    
+	prn("[%d] Performing %ld page accesses for warmup\n", tinfo->thread_num, iter_warmup);
+	sw_start(&sw);
+	for (i = 0; i < iter_warmup; ++i) {
+	    uint32_t* a_addr = get_access_address(buf, pattern->get_next(ctx), p->get_offset(&offset_ctx));
+	    if ((p->get_accesstype(&action_ctx) % 100) < p->ratio)	{
+		access->exercise_read(a_addr); 
+	    } else { 	
+		access->exercise_write(a_addr);
+	    }
+	    if (p->delay > 10) sys_delay(p->delay);
 	}
-//out_warmup_interrupted:
+/*
+		//XXX fill in garbage to beat compression/dedup
+		{
+			int i, j;
+			uint32_t val;
+			uint64_t garbage = 0x0ddfadedbeefd00d;
+			for (i = 0; i < num_pages; i++) {
+				for (j = 0; j < PAGE_SIZE; j+=4) {
+					garbage = garbage * 6364136223846793005ull + 1442695040888963407ull;
+					val = (uint32_t)(garbage >> 32);
+					buf[i*PAGE_SIZE + j] = val;
+				}
+			}
+		}
+*/
+	sw_stop(&sw);
+
+	presult->total_warmup_clock = sw.elapsed_sum;
+	presult->total_warmup_count = iter_warmup;
+
+	prn("[%d] Warmup done - took %d us\n", tinfo->thread_num, sw_get_usec(&sw));
+	sw_reset(&sw, tsops);
+
+	if (do_memstat) sys_stat_mem_update(&mem_ctx, &mem_info_before_run);
+    }
+    //out_warmup_interrupted:
     thread_sync(TS_WARMUP_DONE);
     /* main thread collects warmup stats between the two sync points */
     thread_sync(TS_MAIN_BM_START);
@@ -1177,44 +1172,19 @@ void* main_bm_thread(void* arg)
     done_tsc += sw_start(&sw);
 	
     while ((now = tsops->timestamp()) < done_tsc) {
-    	alarm_check(now);
-    	for (i = 0; i < 10000; ++i)
-    	{
-    		if ( (p->get_accesstype(&action_ctx) % 100) < p->ratio)	
-    		{	
-    			access->record
-    			(	
-    				stats, 			
-    				access->exercise_read	
-    				(
-    					get_access_address
-    					(
-    						buf, 
-    						pattern->get_next(ctx), 
-    						p->get_offset(&offset_ctx)
-    					)
-    				)
-    			); 
-    		}
-    		else																	
-    		{ 	
-    			access->record
-    			(	
-    				stats + 2048,	
-    				access->exercise_write	
-    				(
-    					get_access_address
-    					(
-    						buf, 
-    						pattern->get_next(ctx), 
-    						p->get_offset(&offset_ctx)
-    					)
-    				)
-    			); 
-    		}
-    		if (p->delay > 10) sys_delay(p->delay);
-    	}
-    	tenk++;
+	alarm_check(now);
+	for (i = 0; i < 10000; ++i) {
+	    uint32_t* a_addr = get_access_address(buf, pattern->get_next(ctx), p->get_offset(&offset_ctx));
+	    if ( (p->get_accesstype(&action_ctx) % 100) < p->ratio)	{	
+		uint32_t latency_ns = access->exercise_read(a_addr);
+		access->record(stats, latency_ns, 0);
+	    } else { 	
+		uint32_t latency_ns = access->exercise_write(a_addr);
+		access->record(stats, latency_ns, 1);
+	    }
+	    if (p->delay > 10) sys_delay(p->delay);
+	}
+	tenk++;
     	if (control.interrupted) break;
     }
     sw_stop(&sw);
@@ -1223,23 +1193,14 @@ void* main_bm_thread(void* arg)
 
     presult->total_bench_clock = sw.elapsed_sum;
     presult->total_bench_count = tenk * 10000;
+
     prn("[%d] Benchmark done - took %0.3f sec for %d page access\n"
         "  (Average %0.3f usec per page access)\n", tinfo->thread_num,
 	(float)sw_get_usec(&sw)/1000000.0f, tenk*10000,
-	(float)sw_get_usec(&sw)/(tenk*10000)); //}
+	(float)sw_get_usec(&sw)/(tenk*10000));
 
     pattern->free_pattern(ctx);
 
-    if (tinfo->thread_num > 1)
-    {
-		#ifdef PMB_THREAD
-    	sem_wait(&finish_read);
-		#endif
-    	access->finish(control.stats, tinfo->thread_num, p->ratio);
-		#ifdef PMB_THREAD
-    	sem_post(&finish_read);
-		#endif
-    }
     return NULL;
 }
 
@@ -1298,21 +1259,26 @@ perform_benchmark_mt(char *buf, char *stats)
     thread_sync(TS_WARMUP_DONE);
 
     /* check again for ctrl-c interruption */
-	if (control.interrupted) {
-		// the benchmark is interrupted during warmup, we just bail the program..
-		prn("Benchmark terminated during warmup - report will not be generated\n");
-		exit(EXIT_FAILURE);
-	}
+    if (control.interrupted) {
+	// the benchmark is interrupted during warmup, we just bail the program..
+	prn("Benchmark terminated during warmup - report will not be generated\n");
+	exit(EXIT_FAILURE);
+    }
 
     // release the hounds - synchronize all threads to start main bm
-	thread_sync(TS_MAIN_BM_START);
+    thread_sync(TS_MAIN_BM_START);
 
     /* join workers to finish */
-	for (i = 0; i < num_threads; i++) {
-		s = pthread_join(tinfo[i].thread_id, &res);
-		if (s != 0) handle_error_en(s, "pthread_join");
+    for (i = 0; i < num_threads; i++) {
+	s = pthread_join(tinfo[i].thread_id, &res);
+	if (s != 0) handle_error_en(s, "pthread_join");
+    }
+    prn("All threads joined\n");
+
+    // finish collapses per-thread stats into one
+	if (num_threads > 1) {
+    params.access->finish(control.stats, num_threads);
 	}
-	prn("All threads joined\n");
 
    if (control.interrupted) { prn("Benchmark interrupted during run - partial report will be generated\n"); }
 }
@@ -1517,11 +1483,6 @@ int main(int argc, char** argv)
     		prn("attaching device failed: %s\n", params.xalloc_path);
     		return 1;
     	}
-    }
-#endif
-#ifdef _WIN32
-#ifdef XALLOC
-    if (params.xalloc_mib) {
     	/* xmmap memory size in # of 4K pages, not byte size */
     	size_t p_pgcount = params.xalloc_mib << (20 - PAGE_SHIFT);
     	if (p_pgcount > map_num_pfn) p_pgcount = map_num_pfn;
@@ -1537,6 +1498,8 @@ int main(int argc, char** argv)
     	memset(buf, 0, map_num_pfn << 12);
     } else {
 #endif
+#ifdef _WIN32
+	if (params.cold) prn("WARNING: Windows 10 is known to give inaccurate results if memory compression is enabled and the map is uninitialized.\n");
 	buf = VirtualAlloc(NULL, map_num_pfn * PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	if (buf == NULL) {
 	    ret = GetLastError();
@@ -1544,65 +1507,72 @@ int main(int argc, char** argv)
 		prn("sizeof(map_num_pfn):%d, map_num_pfn:%ld, map_num_pfn*PAGE_SIZE:%"PRIu64"\n", sizeof(map_num_pfn), map_num_pfn, map_num_pfn * PAGE_SIZE);
 	    return 1;
 	}
-	stats = VirtualAlloc(NULL, 4096 * params.jobs, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-	if (stats == NULL)
+
+/*
+	HANDLE handl = CreateFileMapping
+	(
+		INVALID_HANDLE_VALUE,
+		NULL,
+		PAGE_READWRITE | SEC_COMMIT | SEC_NOCACHE,
+		(uint32_t)((map_num_pfn * PAGE_SIZE) >> 32),
+		(uint32_t)(map_num_pfn * PAGE_SIZE),
+		"pmbenchMapObject"
+	);
+	if (handl == NULL)
 	{
 		ret = GetLastError();
-		prn("stats VirtualAlloc failed. Error:%d\n", ret);
-		return 1;
+		printf("Create file mapping error: %d\n", ret);
+		exit(1);
+	}	
+	buf = (char *)MapViewOfFile(handl, FILE_MAP_ALL_ACCESS, 0, 0, map_num_pfn * PAGE_SIZE);
+	if (buf == NULL)
+	{
+		ret = GetLastError();
+		printf("Map view of file error: %d\n", ret); //error 6 == invalid handle
+		exit(1);
 	}
-#ifdef XALLOC
-    }
-#endif
+	//memset(buf, 0x00, map_num_pfn * PAGE_SIZE);
+*/
+	stats = VirtualAlloc(NULL, 4096 * params.jobs, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	if (stats == NULL) {
+	    ret = GetLastError();
+	    prn("stats VirtualAlloc failed. Error:%d\n", ret);
+	    return 1;
+	}
+	
 #else
-#ifdef XALLOC
-    if (params.xalloc_mib) {
-    	/* xmmap memory size in # of 4K pages, not byte size */
-    	size_t p_pgcount = params.xalloc_mib << (20 - PAGE_SHIFT);
-    	if (p_pgcount > map_num_pfn) p_pgcount = map_num_pfn;
-
-    	buf = xmmap(ctx, map_num_pfn, p_pgcount, XALLOC_MAP_ATTR_READWRITE);
-
-    	if (buf == XMMAP_FAILED) {
-    		perror("xmmap failed");
-    		return 1;
-    	}
-
-    	// xmmap returns memory unscrubbed. zero out the memory.
-    	memset(buf, 0, map_num_pfn << 12);
-    } else {
-#endif
-    int permissions;
-    switch (params.ratio)
-    {
-    	case 0: { permissions = PROT_WRITE; break; }
-    	case 100: { permissions = PROT_READ; break; }
-    	default: { permissions = PROT_READ | PROT_WRITE; break; }
-    }
-    buf = mmap(		NULL, 									//address
-    						map_num_pfn * PAGE_SIZE, 			//length = params.mapsize_mib * 256 * PAGE_SIZE
-							permissions, 							//read and write permitted
-							MAP_PRIVATE | MAP_ANONYMOUS,		//anonymous, private mapping
-							-1, 										//filedes
-							0); 										//offset
-    stats = mmap( 	NULL,
-    						(size_t)(4096 * params.jobs),
-							PROT_READ | PROT_WRITE,
-							MAP_PRIVATE | MAP_ANONYMOUS,
-							-1,
-							0); //1 page per thread; read and write statistics get 2k each
+	int permissions = PROT_READ;
+	if (params.ratio < 100) { permissions |= PROT_WRITE; }
+	buf = mmap(NULL, map_num_pfn * PAGE_SIZE, permissions, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (buf == MAP_FAILED) {
 	    perror("buf mmap failed");
 	    return 1;
 	}
-	if (stats == MAP_FAILED)
-	{
+	stats = mmap(NULL, (size_t)(4096 * params.jobs), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); //1 page per thread; read and write statistics get 2k each
+	if (stats == MAP_FAILED) {
 	    perror("stats mmap failed");
 	    return 1;
 	}
+#endif
+//if (!params.cold)
+//{
+	//XXX fill in garbage to beat compression/dedup
+	{
+	    int i, j;
+	    uint64_t state = 0xdeadbeefdeadbeef;
+	    uint32_t val;
+	    for (i = 0; i < map_num_pfn; i++) {
+		for (j = 0; j < PAGE_SIZE; j+=4) {
+		    //dk prng
+		    state = state * 6364136223846793005ull + 1442695040888963407ull;
+		    val = (uint32_t)(state >> 33);
+		    buf[i*PAGE_SIZE + j] = val;
+		}
+	    }
+	}
+//}
 #ifdef XALLOC
     }
-#endif
 #endif
     //debug_verify_distributions();
     sys_stat_mem_init(&mem_ctx);
@@ -1610,7 +1580,6 @@ int main(int argc, char** argv)
     install_ctrlc_handler();
 
 #ifdef PMB_THREAD
-    sem_init(&finish_read, 0, 1); //semaphore for access.finish
     perform_benchmark_mt(buf, stats);
 #else
     perform_benchmark_st(buf, stats);
@@ -1620,27 +1589,41 @@ int main(int argc, char** argv)
 #ifdef _WIN32
 #ifdef XALLOC
     if (params.xalloc_mib) {
-		ret = xunmap(ctx);
-		if (ret) {
-			perror("xunmap failed");
-			goto report_no_unmap;
-		}
+	ret = xunmap(ctx);
+	if (ret) {
+	    perror("xunmap failed");
+	    goto report_no_unmap;
+	}
     } else {
 #endif
 	// VirtualFree requires dwSize to be 0 when memory region is released
-	ret = VirtualFree(buf, 0, MEM_RELEASE);
+	ret = VirtualFree(buf, 0, MEM_RELEASE);	
 	if (!ret) {
 	    ret = GetLastError();
-		prn("VirtualFree failed. Error:%d", ret);
+	    prn("VirtualFree failed. Error:%d", ret);
 	    goto report_no_unmap;
 	}
 	ret = VirtualFree(stats, 0, MEM_RELEASE);
-	if (!ret)
-	{	
-		ret = GetLastError();
-		prn("VirtualFree stats failed. Error:%d", ret);
-		goto report_no_unmap;
+	if (!ret) {	
+	    ret = GetLastError();
+	    prn("VirtualFree stats failed. Error:%d", ret);
+	    goto report_no_unmap;
 	}
+/*
+    if (!UnmapViewOfFile(buf))
+    {
+	    ret = GetLastError();
+	    prn("Unmap view of file error: %d\n", ret);
+	    goto report_no_unmap;
+    }
+    if (!CloseHandle(handl))
+    {
+	    ret = GetLastError();
+	    prn("Close handle error: %d\n", ret);
+	    goto report_no_unmap;
+    }
+*/
+
 #ifdef XALLOC
     }
 #endif

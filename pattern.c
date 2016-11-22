@@ -498,3 +498,9 @@ extern get_pattern_fn get_offset_function(int n)
 		default: 	return &dk_random_offset;
 	}
 }
+
+extern get_pattern_fn get_accesstype_function(int n)
+{
+	return &dk_random_offset;
+}
+

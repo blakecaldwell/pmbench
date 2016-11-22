@@ -202,7 +202,8 @@ uint32_t sw_get_nsec(const struct stopwatch* sw)
 }
 
 static inline
-uint32_t sw_get_usec(const struct stopwatch* sw) { return (uint32_t)((sw->elapsed_sum * 1000)/sw->ops->base_freq_khz); 
+uint32_t sw_get_usec(const struct stopwatch* sw) { 
+	return (uint32_t)((sw->elapsed_sum * 1000)/sw->ops->base_freq_khz); 
 }
 
 extern struct sys_timestamp rdtsc_ops;

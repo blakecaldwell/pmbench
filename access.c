@@ -66,9 +66,14 @@ void atomic_dec_64(uint64_t *pval) {
 #endif //__x86_64__
 */
 
-static void finish_touch(char* buf, int b) {}
+static
+void finish_touch(char* buf, int b)
+{
+    return;
+}
 
-static void touch_report(char* buf, int ratio)
+static
+void touch_report(char* buf, int ratio)
 {
     printf("touch_report: nothing to report\n");
     return;
@@ -92,63 +97,77 @@ static void touch_report(char* buf, int ratio)
  */
 
 struct histogram_sub_64 { 
-	uint64_t hex[16]; 
+    uint64_t hex[16]; 
 }  __attribute__((packed)); //64-bit histogram
 
 struct histogram_64 { 
-	struct histogram_sub_64 buckets[16]; 
+    struct histogram_sub_64 buckets[16]; 
 } __attribute__((packed)); //64-bit read and write histogram, occupies a full page
 
 extern const struct sys_timestamp* get_tsops(void);
 
-_code uint32_t read_access_histogram(uint32_t *ptr)
+static
+_code 
+uint32_t measure_read(uint32_t *ptr)
 {
-	volatile
     register uint32_t _val_sink;
     struct stopwatch sw;
     sw_reset(&sw, get_tsops());
     sw_start(&sw);
     //asm following implements: _val_sink = *ptr;
-    asm volatile 
-	(
-	 //"mfence \n\t"
+    asm volatile (
 	 "movl %1, %0\n\t"
-	 //"nop"
-	 : 	"=r" (_val_sink)
-	 : 	"m" (*ptr)
-	 :	"memory"    	
-	);
+	  : "=r" (_val_sink)
+	  : "m" (*ptr)
+	  : "memory");
+
     sw_stop(&sw);
     return sw_get_nsec(&sw); //_val_sink;
 }
 
-_code uint32_t write_access_histogram(uint32_t *ptr)
+static
+_code 
+uint32_t measure_write(uint32_t *ptr)
 {
-    volatile register uint32_t val_to_write = (uint32_t)(uintptr_t)(ptr); // let's write the ptr value
+    uint32_t val_to_write;
     struct stopwatch sw;
+
+    val_to_write = (uint32_t)(uintptr_t)(ptr); // let's write the ptr value
+
     sw_reset(&sw, get_tsops());
     sw_start(&sw);
     // asm following implements: *ptr = val_to_write;
-    asm volatile
-	(
-	 //"mfence \n\t"
+    asm volatile (
 	 "movl %1, %0 \n\t"
-	 //"nop"
-	 : 	"=m" (*ptr)
-	 : 	"r" (val_to_write)
-	 :	"memory"
-	);
+	  : "=m" (*ptr)
+	  : "r" (val_to_write)
+	  : "memory");
+
     sw_stop(&sw);
     return sw_get_nsec(&sw);
 }
 
-_code void record_touch_dummy(char *a, uint32_t b, int c) {}
-
-_code void record_histogram(char *stats, uint32_t elapsed_nsec, int is_write)
+_code 
+uint32_t access_histogram(uint32_t *ptr, int is_write)
 {
-	is_write = (is_write ? 1 : 0);
+    if (is_write) return measure_write(ptr);
+    return measure_read(ptr);
+}
+
+
+_code
+void record_touch_dummy(char *a, uint32_t b, int c)
+{
+    return;
+}
+
+_code
+void record_histogram(char *stats, uint32_t elapsed_nsec, int is_write)
+{
     struct histogram_64* histo = (struct histogram_64*)(stats); //this should be pointing to the thread's read/write histogram page
     uint64_t *pcounter;
+
+    is_write = (is_write ? 1 : 0);
 
     if (elapsed_nsec < (1 << 8)) {
 	pcounter = &histo[is_write].buckets[0].hex[0];
@@ -163,7 +182,6 @@ _code void record_histogram(char *stats, uint32_t elapsed_nsec, int is_write)
 	    pcounter = &histo[is_write].buckets[0].hex[8 + index - 16];
 	}
     }
-    // we have per-thread histrogram counter - no need for atomic
     //atomic_inc_64(pcounter);
     (*pcounter)++;
 }
@@ -171,7 +189,8 @@ _code void record_histogram(char *stats, uint32_t elapsed_nsec, int is_write)
 /*
  * this finish function should be called by main thread after all workers join
  */
-static void finish_histogram(char *stats, int num_threads)
+static
+void finish_histogram(char *stats, int num_threads)
 {
     struct histogram_64 *result_array = (struct histogram_64*)stats;
     struct histogram_64 *result_r = &result_array[0];
@@ -191,15 +210,14 @@ static void finish_histogram(char *stats, int num_threads)
 		result_w->buckets[bucket].hex[hex] += histo_w->buckets[bucket].hex[hex]; 
 	    }
 	}
-
     }
 }
 
-extern uint64_t * get_histogram_bucket(char *buf, int is_write, int bucketnum)
+uint64_t* get_histogram_bucket(char *buf, int is_write, int bucketnum)
 {
-	is_write = (is_write ? 1 : 0);
-	struct histogram_64 *bin = (struct histogram_64 *)(buf);
-	return bin[is_write].buckets[bucketnum].hex;
+    is_write = (is_write ? 1 : 0);
+    struct histogram_64 *bin = (struct histogram_64 *)(buf);
+    return bin[is_write].buckets[bucketnum].hex;
 }
 
 void __attribute__((cold)) dump_histogram_64(const struct histogram_64 *bin)
@@ -259,8 +277,7 @@ static void histogram_report(char* buf, int ratio)
 
 access_fn_set touch_access = {
     //.warmup = NULL, //touch_only,
-    .exercise_read = read_access_histogram, 	//should this be an edited version without the stopwatch?
-    .exercise_write = write_access_histogram,
+    .exercise = access_histogram,
     .record = record_touch_dummy,
     .finish = finish_touch,
     .report = touch_report,
@@ -270,8 +287,7 @@ access_fn_set touch_access = {
 
 access_fn_set histogram_access = {
     //.warmup = NULL, //touch_only,
-    .exercise_read = read_access_histogram,
-    .exercise_write = write_access_histogram,
+    .exercise = access_histogram,
     .record = record_histogram,
     .finish = finish_histogram,
     .report = histogram_report,
@@ -279,16 +295,20 @@ access_fn_set histogram_access = {
     .description = "Touch and keep latency histogram"
 };
 
-/*b* all access_fns */
-static access_fn_set* all_access_fn[] = { &touch_access, &histogram_access, 0 };
+/* 
+ * all access_fns
+ */
+static access_fn_set* all_access_fn[] = { 
+    &touch_access, &histogram_access, 0
+};
 
 access_fn_set* get_access_from_name(const char* str)
 {
     int i = 0;
     if (!str) return 0;
-    while (all_access_fn[i])
-    {
-    	if (!my_strncmp(all_access_fn[i]->name, str, 16)) return all_access_fn[i];
+    while (all_access_fn[i]) {
+    	if (!my_strncmp(all_access_fn[i]->name, str, 16))
+	    return all_access_fn[i];
     	i++;
     }
     return 0;

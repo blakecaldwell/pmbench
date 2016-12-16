@@ -35,8 +35,7 @@
 /* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 typedef struct access_fn_set {
-    uint32_t (*exercise_read)(uint32_t *ptr); // main touch function
-    uint32_t (*exercise_write)(uint32_t *ptr);
+    uint32_t (*exercise)(uint32_t *ptr, int is_write);
     void (*record)(char *stats, uint32_t elapsed_nsec, int is_write);
     void (*finish)(char *buf, int num_threads);	// compile stat results
     void (*report)(char *buf, int ratio);	// print results

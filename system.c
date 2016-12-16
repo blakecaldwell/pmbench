@@ -674,19 +674,18 @@ sys_stat_mem_print_delta(const sys_mem_item* before, const sys_mem_item* after)
 
 int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i)
 {
-	const MEMORYSTATUSEX* stat_b = &before->memstatex;
-	const MEMORYSTATUSEX* stat_a = &after->memstatex;
-	switch (i)
-	{
-		case (0): return (int64_t)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000;
-	   case (1): return (int)(stat_a->dwMemoryLoad - stat_b->dwMemoryLoad);
-	   case (2): return (int64_t)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000;
-	   case (3): return (int64_t)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000;
-      case (4): return (int64_t)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000;
-      default:
-      	printf("sys_stat_mem_get_delta(%p, %p, %d): Error\n", before, after, i);
-         return 0;
-	}
+    const MEMORYSTATUSEX* stat_b = &before->memstatex;
+    const MEMORYSTATUSEX* stat_a = &after->memstatex;
+    switch (i) {
+    case (0): return (int64_t)(stat_a->ullAvailPhys - stat_b->ullAvailPhys)/1000;
+    case (1): return (int)(stat_a->dwMemoryLoad - stat_b->dwMemoryLoad);
+    case (2): return (int64_t)(stat_a->ullTotalPageFile - stat_b->ullTotalPageFile)/1000;
+    case (3): return (int64_t)(stat_a->ullAvailPageFile - stat_b->ullAvailPageFile)/1000;
+    case (4): return (int64_t)(stat_a->ullAvailVirtual - stat_b->ullAvailVirtual)/1000;
+    default:
+	printf("sys_stat_mem_get_delta(%p, %p, %d): Error\n", before, after, i);
+	return 0;
+    }
 }
 #else
 int sys_stat_mem_init(sys_mem_ctx* ctx)
@@ -931,12 +930,12 @@ char* sys_get_time_info_string(int i)
     if (!getDateFormat_ret) return "unavailable";
 
     switch (i) {
-	case (9): return date_strbuf;
-	case (10): return time_strbuf;
-	case (5): return year_strbuf;
-	default:
-	    printf("sys_get_time_info_string(%d) Error\n", i);
-	    return "error";
+    case (9): return date_strbuf;
+    case (10): return time_strbuf;
+    case (5): return year_strbuf;
+    default:
+	printf("sys_get_time_info_string(%d) Error\n", i);
+	return "error";
     }
 }
 
@@ -991,9 +990,9 @@ char* sys_get_hostname(void)
 char* sys_get_os_version_string(int i)
 {
     switch (i) {
-	case 0: return uname_buf.sysname;
-	case 4: return uname_buf.release;
-	default: return 0;
+    case 0: return uname_buf.sysname;
+    case 4: return uname_buf.release;
+    default: return 0;
     }
 }
 
@@ -1023,18 +1022,18 @@ int sys_print_time_info(void)
 int sys_get_time_info_value(int i)
 {
     switch (i) {
-	case (0): return timestamp_time.tm_sec;
-	case (1): return timestamp_time.tm_min;
-	case (2): return timestamp_time.tm_hour;
-	case (3): return timestamp_time.tm_mday;
-	case (4): return timestamp_time.tm_mon;
-	case (5): return timestamp_time.tm_year;
-	case (6): return timestamp_time.tm_wday;
-	case (7): return timestamp_time.tm_yday;
-	case (8): return timestamp_time.tm_isdst;
-	default:
-	    printf("sys_get_time_info_value(%d): Error\n", i);
-	    return 0;
+    case (0): return timestamp_time.tm_sec;
+    case (1): return timestamp_time.tm_min;
+    case (2): return timestamp_time.tm_hour;
+    case (3): return timestamp_time.tm_mday;
+    case (4): return timestamp_time.tm_mon;
+    case (5): return timestamp_time.tm_year;
+    case (6): return timestamp_time.tm_wday;
+    case (7): return timestamp_time.tm_yday;
+    case (8): return timestamp_time.tm_isdst;
+    default:
+	printf("sys_get_time_info_value(%d): Error\n", i);
+	return 0;
     }
 }
 

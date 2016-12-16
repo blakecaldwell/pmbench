@@ -72,8 +72,6 @@ uint32_t dk_random_next(uint64_t* state) {
     (*state) = (*state) * 6364136223846793005ull + 1442695040888963407ull;
     return ((*state) >> 33);
 }
-static _code uint32_t dk_random_offset(uint64_t *state) { return dk_random_next(state) >> 21; }
-static _code uint32_t static_offset(uint64_t *i) { return (uint32_t)(*i); }
 
 struct sys_random_state {
     uint64_t dkstate;
@@ -81,11 +79,17 @@ struct sys_random_state {
 
 static inline
 void sys_random_init(struct sys_random_state* s, uint32_t seed) {
-	s->dkstate = (uint64_t)seed;
+    s->dkstate = (uint64_t)seed;
 }
 
 static inline
-size_t sys_random_r(struct sys_random_state* s) { return (size_t)dk_random_next(&s->dkstate);
+size_t sys_random_r(struct sys_random_state* s) {
+    return (size_t)dk_random_next(&s->dkstate);
+}
+
+_code
+uint32_t roll_dice(uint64_t* state) {
+    return dk_random_next(state);
 }
 
 /*
@@ -473,14 +477,16 @@ pattern_generator zipf_pattern = {
  * all patterns
  */
 static pattern_generator* all_pattern[] = {
-		&linear_pattern, &uniform_pattern, &normal_pattern, &normal_ih_pattern,
-		&pareto_pattern, &zipf_pattern, 0
+    &linear_pattern, &uniform_pattern, &normal_pattern, &normal_ih_pattern,
+    &pareto_pattern, &zipf_pattern, 0
 };
 
 pattern_generator* get_pattern_from_name(const char* str)
 {
     int i = 0;
+
     if (!str) return NULL;
+
     while (all_pattern[i]) {
 	if (!my_strncmp(all_pattern[i]->name, str, 16))
 	    return all_pattern[i];
@@ -489,18 +495,31 @@ pattern_generator* get_pattern_from_name(const char* str)
     return NULL;
 }
 
-extern get_pattern_fn get_offset_function(int n)
+/*
+ * page offset random generator
+ */
+
+static _code 
+uint32_t offset_random(uint64_t* state)
 {
-	if (n >= 0) { return &static_offset; }
-	switch (n)
-	{
-		case (-1): 	return &dk_random_offset; //other negative numbers could be passed here to select an offset pattern
-		default: 	return &dk_random_offset;
-	}
+    return dk_random_next(state) >> 21;
 }
 
-extern get_pattern_fn get_accesstype_function(int n)
+static _code 
+uint32_t offset_constant(uint64_t* i)
 {
-	return &dk_random_offset;
+    return (uint32_t)(*i);
+}
+
+get_pattern_fn get_offset_function(int n)
+{
+    if (n >= 0) return &offset_constant;
+
+    switch (n) {
+    case -1: 	
+	return &offset_random; //other negative numbers could be passed here to select an offset pattern
+    default: 	
+	return &offset_random;
+    }
 }
 

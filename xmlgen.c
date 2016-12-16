@@ -13,9 +13,12 @@
 
 xmlDoc* xdoc = NULL;
 static const char xmloutput_version[] = "0.1";
-xmlNodePtr pmbenchmarknode = NULL, postrunnode = NULL, sysmeminfonode = NULL;
+xmlNodePtr pmbenchmarknode = NULL;
+xmlNodePtr postrunnode = NULL;
+xmlNodePtr sysmeminfonode = NULL;
 
-xmlChar tempbuf[57];
+
+static xmlChar tempbuf[57];
 
 xmlChar* floatToXmlChar(double f)
 {
@@ -303,13 +306,12 @@ static
 xmlNodePtr makeCacheInfoNode(xmlNodePtr machineinfonode, int cachetypes)
 {
     xmlNodePtr cacheinfonode = xmlNewChild(machineinfonode, NULL, BAD_CAST "cache_info", NULL);
-    if (cachetypes == 0) { xmlNewProp(cacheinfonode, BAD_CAST "deterministic", BAD_CAST "0"); }
-    else 
-    {
+    if (cachetypes == 0) {
+	xmlNewProp(cacheinfonode, BAD_CAST "deterministic", BAD_CAST "0");
+    } else {
 	xmlNewProp(cacheinfonode, BAD_CAST "deterministic", BAD_CAST "1");
 	int j;
-	for (j = 0; j < cachetypes; j++)
-	{
+	for (j = 0; j < cachetypes; j++) {
 	    xmlNodePtr cachenode = xmlNewChild(cacheinfonode, NULL, BAD_CAST "cache", NULL);
 	    xmlNewProp(cachenode, BAD_CAST "type", BAD_CAST get_cache_type(j));
 	    xmlNewChild(cachenode, NULL, BAD_CAST "level", signedIntToXmlChar(get_cache_info(j, 4)));
@@ -328,8 +330,7 @@ xmlNodePtr makeTlbInfoNode(xmlNodePtr machineinfonode, int tlblength)
 {
     xmlNodePtr tlbinfonode = xmlNewChild(machineinfonode, NULL, BAD_CAST "tlb_info", NULL);
     int j;
-    for (j = 0; j < tlblength; j++)
-    {
+    for (j = 0; j < tlblength; j++) {
 	xmlNodePtr tlbitemnode = xmlNewChild(tlbinfonode, NULL, BAD_CAST "tlb_item", NULL);
 	xmlNewProp(tlbitemnode, BAD_CAST "index", unsignedIntToXmlChar(j));
 	xmlNewProp(tlbitemnode, BAD_CAST "id", byteToXmlChar(get_tlb_info(j)));

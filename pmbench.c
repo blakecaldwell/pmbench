@@ -125,7 +125,6 @@ void set_default_params(parameters* p)
     p->offset = -1;
     p->get_offset = get_offset_function(-1);
     p->ratio = 50;
-    p->get_accesstype = get_offset_function(-1);
 #ifdef PMB_XML
     p->xml = 0;
 #endif
@@ -241,7 +240,6 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
 	    printf("read/write ratio out of bounds, must be from 0-100.\n");
 	    exit(EXIT_FAILURE);
 	}
-    	param->get_accesstype = get_accesstype_function(0);
     	break;
     case 'o':
     	param->offset = (arg ? atoi(arg) : -1);
@@ -592,12 +590,11 @@ void thread_sync(int syncpoint) {
 }
 
 /*
- * access address = ( base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
+ * access address = (base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
  */
 static inline 
-uint32_t* get_access_address(char *buf, size_t pfn, uint32_t offset)
-{
-    return (uint32_t*)(buf + (pfn << PAGE_SHIFT) + (offset) * sizeof(uint32_t));
+uint32_t* calc_address(char *buf, size_t pfn) {
+    return (uint32_t*)(buf + (pfn << PAGE_SHIFT));
 }
 
 /**
@@ -624,13 +621,20 @@ void* main_bm_thread(void* arg)
     const parameters* p = &params;
     pattern_generator* pattern = p->pattern;
     access_fn_set* access = p->access;
-    uint64_t offset_ctx = (p->offset < 0 ? (uint64_t)(tinfo->thread_num + 7) : (uint64_t)p->offset);
-    uint64_t action_ctx = (uint64_t)(tinfo->thread_num + 50);
+    uint64_t rand_ctx_offset = (p->offset < 0 ? (uint64_t)(tinfo->thread_num + 7) : (uint64_t)p->offset);
+    uint64_t rand_ctx_action = (uint64_t)(tinfo->thread_num + 50);
     struct sys_timestamp* tsops = p->tsops;
     struct stopwatch sw;
     int i;
     uint64_t tenk;
     uint64_t done_tsc, now;
+
+    uint32_t* a_addr;
+    int is_write;
+    uint32_t latency_ns;
+
+    /* we upconvert ratio to 0-1023 scale to avoid modular op*/
+    int rat_scaled = ((p->ratio)*1024)/100;
 
     /* note on data type for page count:
      * size_t and ssize_t types are used when consistent integer
@@ -671,16 +675,17 @@ void* main_bm_thread(void* arg)
 	iter_warmup = pattern->get_warmup_run ?
 	    pattern->get_warmup_run(ctx) : num_pages;
 	    
-	prn("[%d] Performing %ld page accesses for warmup\n", tinfo->thread_num, iter_warmup);
+	prn("[%d] Performing %ld page accesses for warmup\n",
+		tinfo->thread_num, iter_warmup);
 	sw_start(&sw);
 	for (i = 0; i < iter_warmup; ++i) {
-	    uint32_t* a_addr = get_access_address(buf, pattern->get_next(ctx), p->get_offset(&offset_ctx));
-	    if ((p->get_accesstype(&action_ctx) % 100) < p->ratio)	{
-		access->exercise_read(a_addr); 
-	    } else { 	
-		access->exercise_write(a_addr);
-	    }
-	    if (p->delay > 10) sys_delay(p->delay);
+	    a_addr = calc_address(buf, pattern->get_next(ctx));
+	    a_addr += p->get_offset(&rand_ctx_offset);
+	    is_write = (roll_dice(&rand_ctx_action) % 1024) < rat_scaled ? 0 : 1;
+
+	    access->exercise(a_addr, is_write);
+
+//	    if (p->delay > 10) sys_delay(p->delay); // no delay in warmup..
 	}
 	sw_stop(&sw);
 
@@ -692,6 +697,7 @@ void* main_bm_thread(void* arg)
 
 	if (do_memstat) sys_stat_mem_update(&mem_ctx, &mem_info_before_run);
     }
+
     //out_warmup_interrupted:
     thread_sync(TS_WARMUP_DONE);
     /* main thread collects warmup stats between the two sync points */
@@ -707,14 +713,13 @@ void* main_bm_thread(void* arg)
     while ((now = tsops->timestamp()) < done_tsc) {
 	alarm_check(now);
 	for (i = 0; i < 10000; ++i) {
-	    uint32_t* a_addr = get_access_address(buf, pattern->get_next(ctx), p->get_offset(&offset_ctx));
-	    if ( (p->get_accesstype(&action_ctx) % 100) < p->ratio)	{	
-		uint32_t latency_ns = access->exercise_read(a_addr);
-		access->record(stats, latency_ns, 0);
-	    } else { 	
-		uint32_t latency_ns = access->exercise_write(a_addr);
-		access->record(stats, latency_ns, 1);
-	    }
+	    a_addr = calc_address(buf, pattern->get_next(ctx));
+	    a_addr += p->get_offset(&rand_ctx_offset);
+	    is_write = (roll_dice(&rand_ctx_action) % 1024) < rat_scaled ? 0 : 1;
+
+	    latency_ns = access->exercise(a_addr, is_write);
+	    access->record(stats, latency_ns, is_write);
+
 	    if (p->delay > 10) sys_delay(p->delay);
 	}
 	tenk++;
@@ -809,11 +814,13 @@ perform_benchmark_mt(char *buf, char *stats)
     prn("All threads joined\n");
 
     // finish collapses per-thread stats into one
-	if (num_threads > 1) {
-    params.access->finish(control.stats, num_threads);
-	}
+    if (num_threads > 1) {
+	params.access->finish(control.stats, num_threads);
+    }
 
-   if (control.interrupted) { prn("Benchmark interrupted during run - partial report will be generated\n"); }
+    if (control.interrupted) { 
+	prn("Benchmark interrupted during run - partial report will be generated\n"); 
+    }
 }
 #else 
 extern void perform_benchmark_st(char *buf, char *stats) _code;

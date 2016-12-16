@@ -1,0 +1,4 @@
+Pmbench is a standalone microbenchmark aimed to profile system paging and memory subsystem performance.
+
+Please refer to the man page (pmbench.1) under /doc for usage. 
+

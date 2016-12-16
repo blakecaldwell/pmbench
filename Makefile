@@ -8,6 +8,14 @@
 # - mingw64-gcc
 # - mingw64-pthreads
 # - mingw64-pthreads-static
+#
+# Packages needed for XML output:
+# - libxml2
+# - libxml2-devel
+# - mingw32-libxml2	 (below for windows 32/64 builds)
+# - mingw32-win-iconv
+# - mingw64-libxml2
+# - mingw64-win-iconv
 
 
 # 32/64 cross-platform compilation tip:
@@ -82,9 +90,9 @@ LXML := -lxml2
 
 all: pmbench pmbench.exe
 
-pmbench: pmbench.o pattern.o system.o access.o
+pmbench: pmbench.o pattern.o system.o access.o xmlgen.o
 	$(CC) $+ -lm -luuid $(LXML) -o $@ $(LFLAGS_LINUX)
-	objdump -M intel -d $@ > $@.dmp
+	objdump -d $@ > $@.dmp
 
 
 check:
@@ -157,9 +165,9 @@ dist_src:
 	$(CC) -c $(CFLAGS) $(CFLAGS_LINUX) -o $@ $<
 
 
-pmbench.exe: pmbench.obj pattern.obj system.obj access.obj
+pmbench.exe: pmbench.obj pattern.obj system.obj access.obj xmlgen.obj
 	$(WCC) $+ -lm -lrpcrt4 $(LXML) -o $@ $(LFLAGS_WIN) 
-	objdump -M intel -d $@ > $@.dmp
+	objdump -d $@ > $@.dmp
 
 %.obj: %.c
 	$(WCC) -c $(CFLAGS) $(CFLAGS_WIN) -o $@ $< $(LXML)

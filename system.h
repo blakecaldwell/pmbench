@@ -268,6 +268,13 @@ extern char * sys_get_os_version_string(int i);
 extern int sys_get_time_info_value(int i);
 #endif
 
+extern sys_mem_item mem_info_before_warmup;// stores mem info right before warmup/exercise
+extern sys_mem_item mem_info_before_run;   // stores mem info before exercise, after warmup
+extern sys_mem_item mem_info_middle_run;   // stores mem info at the halfway of exercise
+extern sys_mem_item mem_info_after_run;    // stores mem info right after exercise
+extern sys_mem_item mem_info_after_unmap;  // stores mem info after unmapping (freeing memory) 
+
+
 extern int sys_stat_mem_init(sys_mem_ctx* ctx);
 extern int sys_stat_mem_update(sys_mem_ctx* ctx, sys_mem_item* info);
 extern void sys_stat_mem_print_header(void) __attribute__((cold));
@@ -277,11 +284,19 @@ extern int sys_stat_mem_exit(sys_mem_ctx* ctx);
 
 extern void test_stat_mem(void);
 
-extern int64_t 			sys_stat_mem_get(const sys_mem_item *info, int i);
-extern int64_t 			sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i);
-extern char * 				sys_print_hostname();
-extern char * 				sys_get_cpu_arch();
-extern uint8_t 	get_tlb_info(int i);
-extern char * 				get_cache_type(int i);
-extern int 					get_cache_info(int i, int m);
+extern int64_t sys_stat_mem_get(const sys_mem_item *info, int i);
+extern int64_t sys_stat_mem_get_delta(const sys_mem_item* before, const sys_mem_item* after, int i);
+extern char* sys_print_hostname();
+extern char* sys_get_cpu_arch();
+extern uint8_t get_tlb_info(int i);
+extern char* get_cache_type(int i);
+extern int get_cache_info(int i, int m);
+
+extern char* sys_get_hostname(void);
+extern char* sys_get_uuid(void);
+
+//XXX ugly.. 
+extern int gl_tlb_info_buf_len;
+extern int gl_det_cache_info_len;
+extern int gl_goodtime;
 #endif

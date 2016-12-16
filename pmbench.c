@@ -41,15 +41,6 @@
 #include <inttypes.h>
 #include <fcntl.h>
 
-#ifdef PMB_XML
-#include <libxml/encoding.h>
-#include <libxml/parser.h>
-#include <libxml/tree.h>
-#include <libxml/xmlmemory.h>
-#include <libxml/xmlstring.h>
-#include <libxml/xmlwriter.h>
-#include <libxml/xpath.h>
-#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -74,31 +65,7 @@
 #include "pattern.h"
 #include "access.h"
 
-#define PAGE_SHIFT (12)
-#define PAGE_SIZE (1<<PAGE_SHIFT)
-
-#ifdef _WIN32
-#define OPT_TAG_OS " Windows"
-#else
-#define OPT_TAG_OS " Linux"
-#endif
-#ifdef __x86_64__
-#define OPT_TAG_BITS " 64bit"
-#else
-#define OPT_TAG_BITS " 32bit"
-#endif
-#ifdef PMB_THREAD
-#define OPT_TAG_PMB_THREAD " +mt"
-#else
-#define OPT_TAG_PMB_THREAD " -mt"
-#endif
-#ifdef XALLOC
-#define OPT_TAG_XALLOC " +xa"
-#else
-#define OPT_TAG_XALLOC " -xa"
-#endif
-
-#define COMPILE_OPT_TAGS  OPT_TAG_OS OPT_TAG_BITS OPT_TAG_PMB_THREAD OPT_TAG_XALLOC
+#include "pmbench.h"
 
 /*
  * Program arguments handling
@@ -113,11 +80,11 @@ static struct argp_option options[] = {
     { "quiet", 'q', 0, 0, "Don't produce any output until finish" },
     { "cold", 'c', 0, OPTION_ARG_OPTIONAL, "Don't perform warm-up exercise" },
     { "timestamp", 't', "TIMESTAMP", 0, "Specify TIMESTAMP. rdtsc, rdtscp(def), or perfc" },
-	{ "ratio", 'r', "RATIO", 0, "Percentage read/write ratio (0 = write only, 100 = read only; default 50)" }, //TODO: count # of reads/writes
-	{ "offset", 'o', "OFFSET", 0, "Specify static page access offset (default random)" },
-	{ "initialize", 'i', 0, OPTION_ARG_OPTIONAL, "Initialize memory map with garbage data" },
+    { "ratio", 'r', "RATIO", 0, "Percentage read/write ratio (0 = write only, 100 = read only; default 50)" }, //TODO: count # of reads/writes
+    { "offset", 'o', "OFFSET", 0, "Specify static page access offset (default random)" },
+    { "initialize", 'i', 0, OPTION_ARG_OPTIONAL, "Initialize memory map with garbage data" },
 #ifdef PMB_XML
-	{ "file", 'f', "FILE", 0, "Filename for XML output" },
+    { "file", 'f', "FILE", 0, "Filename for XML output" },
 #endif
 #ifdef PMB_THREAD
     { "jobs", 'j', "NUMJOBS", 0, "Number of concurrent jobs (threads)" },
@@ -130,46 +97,10 @@ static struct argp_option options[] = {
 };
 
 //const char* bd_path = "/mnt/tmpfs/xalloc_blob.img";
-/* 
- * No lock needed for threads access to params.
- * (once set at program start, parameters are only read until program exit)
- */ 
 
-typedef struct parameters {
-    int duration_sec;	    					//benchmark duration in seconds (excluding warmup)
-    int mapsize_mib;	  				  		// anonymous mmap size in megabytes
-    int setsize_mib;	    					// 'working set' size in megabytes (depends on pattern)
-    access_fn_set* access;  					// access method (touch or histo)
-    pattern_generator* pattern;					//benchmark pattern
-    uint32_t (*get_offset) (uint64_t *state);	// gets random or static offset
-    uint32_t (*get_accesstype) (uint64_t *action); 	// future improvements: read/write selection pattern (used by -r) selectable like pattern/shape?
-    double shape;	    						// 'shape' parameter to use for pattern
-    int delay;		    						// minimum clock cycles between accesses
-    int quiet;		    						// no output until done
-    int cold;		    						// don't perform warm up exercise before benchmark
-    struct sys_timestamp* tsops; 				// timestamp ops (rdtsc_ops or perfc_ops)
-    int jobs;		    											// number of worker threads
-    int init_garbage;
-#ifdef XALLOC
-    int xalloc_mib;	    						// positive xalloc_mib indicates we use xalloc instead of mmap
-    char* xalloc_path;	    					// xalloc backend file pathname
-#endif
-    int offset;									// page offset, negative = random
-    int ratio;									// % likelihood of read access
-#ifdef PMB_XML
-    uint8_t xml;
-    char *xml_path;
-#endif
-} parameters;
+// parameter definition moved to pmbench.h
+parameters params;
 
-static parameters params;
-const int versionstrlen = 17;
-#define pmbench_version "pmbench 0.8.0.0.2"
-#ifdef PMB_XML
-xmlDoc *doc = NULL;
-static const char xmloutput_version[] = "0.1";
-xmlNodePtr pmbenchmarknode = NULL, postrunnode = NULL, sysmeminfonode = NULL;
-#endif
 
 static
 __attribute__((cold))
@@ -202,89 +133,41 @@ void set_default_params(parameters* p)
 
 const struct sys_timestamp* get_tsops(void)
 {
-	return params.tsops;
+    return params.tsops;
 }
 
 static
 __attribute__((cold))
 void print_params(const parameters* p)
 {
-	printf("  duration_sec = %d\n", p->duration_sec);
-   printf("  mapsize_mib  = %d\n", p->mapsize_mib);
-   printf("  setsize_mib  = %d\n", p->setsize_mib);
-   printf("  initialize   = %d\n", p->init_garbage);
-   printf("  shape        = %f\n", p->shape);
-   printf("  delay        = %d\n", p->delay);
-   printf("  quiet        = %d\n", p->quiet);
-   printf("  cold         = %d\n", p->cold);
+    printf("  duration_sec = %d\n", p->duration_sec);
+    printf("  mapsize_mib  = %d\n", p->mapsize_mib);
+    printf("  setsize_mib  = %d\n", p->setsize_mib);
+    printf("  initialize   = %d\n", p->init_garbage);
+    printf("  shape        = %f\n", p->shape);
+    printf("  delay        = %d\n", p->delay);
+    printf("  quiet        = %d\n", p->quiet);
+    printf("  cold         = %d\n", p->cold);
 #ifdef PMB_THREAD
-   printf("  jobs         = %d\n", p->jobs);
+    printf("  jobs         = %d\n", p->jobs);
 #endif
-   printf("  offset       = "); if (p->offset < 0) printf("random\n"); else printf("%d\n", p->offset);
-   printf("  ratio        = %d%%\n", p->ratio);
-   if (p->pattern && p->pattern->name) {
-   	printf("  pattern      = %s\n", p->pattern->name);
-   }
-   if (p->access && p->access->name) {
-   	printf("  access       = %s\n", p->access->name);
-   }
-   if (p->tsops && p->tsops->name) {
-   	printf("  tsops        = %s\n", p->tsops->name);
-   }
+    printf("  offset       = "); if (p->offset < 0) printf("random\n"); else printf("%d\n", p->offset);
+    printf("  ratio        = %d%%\n", p->ratio);
+    if (p->pattern && p->pattern->name) {
+	printf("  pattern      = %s\n", p->pattern->name);
+    }
+    if (p->access && p->access->name) {
+	printf("  access       = %s\n", p->access->name);
+    }
+    if (p->tsops && p->tsops->name) {
+	printf("  tsops        = %s\n", p->tsops->name);
+    }
 #ifdef XALLOC
-   printf("  xalloc_mib   = %d\n", p->xalloc_mib);
-   printf("  xalloc_path  = %s\n", p->xalloc_path);
+    printf("  xalloc_mib   = %d\n", p->xalloc_mib);
+    printf("  xalloc_path  = %s\n", p->xalloc_path);
 #endif
 }
 
-#ifdef PMB_XML
-xmlChar tempbuf[57];
-xmlChar * floatToXmlChar(double f)
-{
-	if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%0.4f\0", f) == -1) { printf("floatToXmlChar(%f): Error\n", f); return BAD_CAST "Error"; }
-	return tempbuf;
-}
-xmlChar * signedIntToXmlChar(int64_t i)
-{
-	if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%"PRId64"\0", i) == -1) { printf("signedIntToXmlChar(%"PRId64"): Error\n", i); return BAD_CAST "Error"; }
-	return tempbuf;
-}
-xmlChar * unsignedIntToXmlChar(uint64_t i)
-{
-	if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%"PRIu64"\0", i) == -1) { printf("unsignedIntToXmlChar(%"PRIu64"): Error\n", i); return BAD_CAST "Error"; }
-	return tempbuf;
-}
-xmlChar * byteToXmlChar(uint8_t b)
-{
-	if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%02x\0", b) == -1) { printf("byteToXmlChar(%u): Error\n", b); return BAD_CAST "Error"; }
-	return tempbuf;
-}
-xmlNodePtr makeParamsNode(const parameters *p, xmlNodePtr signaturenode)
-{
-	xmlNodePtr paramsnode = xmlNewChild(signaturenode, NULL, BAD_CAST "params", NULL);
-		xmlNewChild(paramsnode, NULL, BAD_CAST "duration", unsignedIntToXmlChar(p->duration_sec));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "mapsize", unsignedIntToXmlChar(p->mapsize_mib));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "setsize", unsignedIntToXmlChar(p->setsize_mib));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "initialize", signedIntToXmlChar(p->init_garbage));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "shape", floatToXmlChar(p->shape));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "delay", unsignedIntToXmlChar(p->delay));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "quiet", unsignedIntToXmlChar(p->quiet));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "cold", unsignedIntToXmlChar(p->cold));
-#ifdef PMB_THREAD
-		xmlNewChild(paramsnode, NULL, BAD_CAST "jobs", unsignedIntToXmlChar(p->jobs));
-#endif
-		xmlNewChild(paramsnode, NULL, BAD_CAST "offset", signedIntToXmlChar(p->offset));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "ratio", signedIntToXmlChar(p->ratio));
-		if (p->pattern && p->pattern->name) 	{ xmlNewChild(paramsnode, NULL, BAD_CAST "pattern", BAD_CAST p->pattern->name); }
-		if (p->access && p->access->name) 		{ xmlNewChild(paramsnode, NULL, BAD_CAST "access", BAD_CAST p->access->name); }
-		if (p->tsops && p->tsops->name) 			{ xmlNewChild(paramsnode, NULL, BAD_CAST "tsops", BAD_CAST p->tsops->name); }
-#ifdef XALLOC
-		xmlNewChild(paramsnode, NULL, BAD_CAST "xalloc_mib", unsignedIntToXmlChar(p->xalloc_mib));
-		xmlNewChild(paramsnode, NULL, BAD_CAST "xalloc_path", BAD_CAST p->xalloc_path);
-#endif
-	return paramsnode;
-}
-#endif
 
 /* argp parse callback */
 static
@@ -355,33 +238,33 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     case 'r':
     	param->ratio = (arg ? atoi(arg) : 50);
     	if (param->ratio < 0 || param->ratio > 100) { 
-			printf("read/write ratio out of bounds, must be from 0-100.\n");
-			exit(EXIT_FAILURE);
-		}
+	    printf("read/write ratio out of bounds, must be from 0-100.\n");
+	    exit(EXIT_FAILURE);
+	}
     	param->get_accesstype = get_accesstype_function(0);
     	break;
     case 'o':
     	param->offset = (arg ? atoi(arg) : -1);
     	if (param->offset > 1023) { 
-    		printf("page offset out of bounds, must be from 0-1023.\n"); 
-    		exit(EXIT_FAILURE); 
+	   printf("page offset out of bounds, must be from 0-1023.\n"); 
+	   exit(EXIT_FAILURE); 
     	}
     	param->get_offset = get_offset_function(param->offset);
     	break;
 #ifdef PMB_XML
     case 'f':
-    	if (arg)
-    	{
-    		param->xml = 1;
-    		param->xml_path = strdup(arg);
+    	if (arg) {
+	   param->xml = 1;
+	   param->xml_path = strdup(arg);
     	}
     	break;
 #endif
-    case ARGP_KEY_NO_ARGS: break;
+    case ARGP_KEY_NO_ARGS: 
+	break;
     case ARGP_KEY_ARG:
-		if (state->arg_num >= 1) argp_usage(state);
-		param->duration_sec = arg ? atoi(arg) : 1;
-		break;
+	if (state->arg_num >= 1) argp_usage(state);
+	param->duration_sec = arg ? atoi(arg) : 1;
+	break;
     case ARGP_KEY_END:
     	if (state->arg_num < 1) argp_usage(state);
     	break;
@@ -410,23 +293,24 @@ int params_parsing(int argc, char** argv)
     /* N.B. to deal with Windows dll linkage issue, we set these variables here
      * instead of statical assignment */
 
-    argp_parse(&argp, argc, argv, 0, 0, &params);
-    argp_program_version = pmbench_version COMPILE_OPT_TAGS;
+    argp_program_version = PMBENCH_VERSION_STR COMPILE_OPT_TAGS;
     argp_program_bug_address = "Jisoo Yang <jisoo.yang@unlv.edu>";
+
+    argp_parse(&argp, argc, argv, 0, 0, &params);
     /* check for arg sanity */
-	if (params.duration_sec < 1) {
-		printf("invalid parameter: duration must be positive integer\n");
-		exit(EXIT_FAILURE);
-		}
-	if (params.mapsize_mib < params.setsize_mib) {
-		printf("invalid parameter combination: mapsize < setsize\n");
-		exit(EXIT_FAILURE);
-		}
+    if (params.duration_sec < 1) {
+	printf("invalid parameter: duration must be positive integer\n");
+	exit(EXIT_FAILURE);
+    }
+    if (params.mapsize_mib < params.setsize_mib) {
+	printf("invalid parameter combination: mapsize < setsize\n");
+	exit(EXIT_FAILURE);
+    }
 #ifdef PMB_THREAD
-	if (params.jobs < 1) {
-		printf("invalid parameter combination: jobs less than zero\n");
-		exit(EXIT_FAILURE);
-		}
+    if (params.jobs < 1) {
+	printf("invalid parameter combination: jobs less than zero\n");
+	exit(EXIT_FAILURE);
+    }
 #endif
     return 0;
 }
@@ -464,78 +348,59 @@ int prn(const char* format, ...)
 
 uint32_t freq_khz;
 
-/*benchmark result processing */
-struct bench_result {
-    uint64_t total_bench_clock;
-    uint64_t total_bench_count;
-    uint64_t total_warmup_clock;
-    uint64_t total_warmup_count;
-    uint64_t total_numgen_clock;	// pattern generation overhead
-    uint64_t total_numgen_count;
-    int stat_major_fault_clock;
-    int stat_minor_fault_clock;
-};
-
-/* mean_us must do float conversion first to avoid truncation error */
-#define mean_us(name) \
-(((float)presult->total_##name##_clock / presult->total_##name##_count) * 1000 /freq_khz)
-#define mean_clk(name) \
-(presult->total_##name##_clock / presult->total_##name##_count)
-
-static inline
-float clk_to_us(uint64_t clk) {
-	return (float)((clk * 1000) / freq_khz);
-}
-
-static inline
-int us_to_clk(float us) {
-	return (int)(us * freq_khz / 1000);
-}
-
 static inline
 void reset_result(struct bench_result* presult) {
-	memset(presult, 0, sizeof(*presult));
+    memset(presult, 0, sizeof(*presult));
 }
 
 /* per thread info */
 struct thread_info {
 #ifdef PMB_THREAD
-    pthread_t thread_id;	    // returned by pthread_create
+    pthread_t thread_id;	// returned by pthread_create
 #endif
-    int thread_num;		    	// local thread number (1, 2, 3,...)
-    struct bench_result result;	    // per-thread result
+    int thread_num;	    	// local thread number (1, 2, 3,...)
+    struct bench_result result;	// per-thread result
 };
 
 /* thread-shared for concurrency control and shared variable access */
 struct thread_control {
-    struct thread_info* tinfo;	    // thread info array created
-    char *buf;			    		// memory map base pointer for access
-    char *stats;					// histograms base pointer
-    int interrupted;		    	// ctrl-c sets this
+    struct thread_info* tinfo;	// thread info array created
+    char *buf;			// memory map base pointer for access
+    char *stats;		// histograms base pointer
+    int interrupted;		// ctrl-c sets this
 #ifdef PMB_THREAD
-    pthread_barrier_t barrier;	    // barrier for mt
+    pthread_barrier_t barrier;	// barrier for mt
 #endif
 } control;
+ 
+// ugly hack..
+struct bench_result* get_result(int jobid)
+{
+    return &control.tinfo[jobid].result;
+}
 
 static
-void print_result()
+void print_result(void)
 {
    int i;
-   for (i = 0; i < params.jobs; i++)
-	{
-		struct bench_result* presult = &control.tinfo[i].result;
-		float pure_lat = mean_us(bench) - mean_us(numgen);
-		printf("Thread %d/%d:\n", i+1, params.jobs);
-		printf("Net average page latency (Arith. mean): %0.4f us (%d clks)\n", pure_lat, us_to_clk(pure_lat));
-		printf("--- Measurement details ---\n");
-		printf("  Page latency during benchmark (inc. gen): %0.4f us (%d clks)\n", mean_us(bench), (int)mean_clk(bench));
-		printf("    Total samples count: %"PRIu64"\n", presult->total_bench_count);
-		printf("  Pattern generation overhead per drawing : %0.4f us (%d clks)\n", mean_us(numgen), (int)mean_clk(numgen));
-		printf("    Total samples count: %"PRIu64"\n", presult->total_numgen_count);
-		if (params.cold) continue;
-		printf("  Page latency during warmup              : %0.4f us (%d clks)\n", mean_us(warmup), (int)mean_clk(warmup));
-		printf("    Total samples count: %"PRIu64"\n", presult->total_warmup_count);
-    }
+   for (i = 0; i < params.jobs; i++) {
+       struct bench_result* presult = get_result(i);
+       float pure_lat = mean_us(bench) - mean_us(numgen);
+       printf("Thread %d/%d:\n", i+1, params.jobs);
+       printf("Net average page latency (Arith. mean): %0.4f us (%d clks)\n",
+	   pure_lat, us_to_clk(pure_lat));
+       printf("--- Measurement details ---\n");
+       printf("  Page latency during benchmark (inc. gen): %0.4f us (%d clks)\n",
+	   mean_us(bench), (int)mean_clk(bench));
+       printf("    Total samples count: %"PRIu64"\n", presult->total_bench_count);
+       printf("  Pattern generation overhead per drawing : %0.4f us (%d clks)\n",
+	   mean_us(numgen), (int)mean_clk(numgen));
+       printf("    Total samples count: %"PRIu64"\n", presult->total_numgen_count);
+       if (params.cold) continue;
+       printf("  Page latency during warmup              : %0.4f us (%d clks)\n",
+	   mean_us(warmup), (int)mean_clk(warmup));
+       printf("    Total samples count: %"PRIu64"\n", presult->total_warmup_count);
+   }
 }
 
 sys_mem_item mem_info_before_warmup;// stores mem info right before warmup/exercise
@@ -544,428 +409,101 @@ sys_mem_item mem_info_middle_run;   // stores mem info at the halfway of exercis
 sys_mem_item mem_info_after_run;    // stores mem info right after exercise
 sys_mem_item mem_info_after_unmap;  // stores mem info after unmapping (freeing memory) 
 
-#ifdef PMB_XML
-xmlNodePtr makeResultNode(xmlNodePtr reportnode)
-{
-	xmlNodePtr resultnode = xmlNewChild(reportnode, NULL, BAD_CAST "result", NULL);
-	int i;
-   for (i = 0; i < params.jobs; i++)
-	{
-		struct bench_result* presult = &control.tinfo[i].result;
-		float pure_lat = mean_us(bench) - mean_us(numgen);
-		//result_thread[thread_num]
-			xmlNodePtr rn = xmlNewChild(resultnode, NULL, BAD_CAST "result_thread", NULL);
-				xmlNewProp(rn, BAD_CAST "thread_num", unsignedIntToXmlChar(i+1));
-			//result_netavg
-				xmlNodePtr netavgnode = xmlNewChild(rn, NULL, BAD_CAST "result_netavg", NULL);
-				//netavg_us
-					xmlNewChild(netavgnode, NULL, BAD_CAST "netavg_us", floatToXmlChar(pure_lat));
-				//netavg_clk
-					xmlNewChild(netavgnode, NULL, BAD_CAST "netavg_clk", signedIntToXmlChar(us_to_clk(pure_lat)));
-			//result_details
-				xmlNodePtr detailsnode = xmlNewChild(rn, NULL, BAD_CAST "result_details", NULL);
-				//details_latency
-					xmlNodePtr latencynode = xmlNewChild(detailsnode, NULL, BAD_CAST "details_latency", NULL);
-					//latency_us
-						xmlNewChild(latencynode, NULL, BAD_CAST "latency_us", floatToXmlChar(mean_us(bench))); //%0.4f
-					//latency_clk
-						xmlNewChild(latencynode, NULL, BAD_CAST "latency_clk", signedIntToXmlChar((int)mean_clk(bench)));
-				//details_samples
-					xmlNewChild(detailsnode, NULL, BAD_CAST "details_samples", unsignedIntToXmlChar(presult->total_bench_count)); //%"PRIu64"
-				//details_overhead
-					xmlNodePtr overheadnode = xmlNewChild(detailsnode, NULL, BAD_CAST "details_overhead", NULL);
-					//overhead_us
-						xmlNewChild(overheadnode, NULL, BAD_CAST "overhead_us", floatToXmlChar(mean_us(numgen))); //%0.4f
-					//overhead_clk
-						xmlNewChild(overheadnode, NULL, BAD_CAST "overhead_clk", signedIntToXmlChar((int)mean_clk(numgen)));
-				//details_total
-					xmlNewChild(detailsnode, NULL, BAD_CAST "details_total", unsignedIntToXmlChar(presult->total_numgen_count)); //%"PRIu64"
-			if (!params.cold)
-			{
-				//warmup_details
-					xmlNodePtr warmupnode = xmlNewChild(rn, NULL, BAD_CAST "warmup_details", NULL);
-					//warmup_latency
-						xmlNodePtr wlatencynode = xmlNewChild(warmupnode, NULL, BAD_CAST "warmup_latency", NULL);
-						//warmup_us
-							xmlNewChild(wlatencynode, NULL, BAD_CAST "warmup_us", floatToXmlChar(mean_us(warmup))); //%0.4f
-						//warmup_clk
-							xmlNewChild(wlatencynode, NULL, BAD_CAST "warmup_clk", signedIntToXmlChar((int)mean_clk(warmup)));
-					//warmup_total
-						xmlNewChild(warmupnode, NULL, BAD_CAST "warmup_total", unsignedIntToXmlChar(presult->total_warmup_count)); //%"PRIu64"
-			}
-    }
-    return resultnode;
-}
-
-xmlNodePtr makeBucketNode(xmlNodePtr node, int i, int lo, int hi, uint64_t sum_count)
-{
-	xmlNodePtr bucketnode = xmlNewChild(node, NULL, BAD_CAST "histo_bucket", NULL);
-	xmlNewProp(bucketnode, BAD_CAST "index", signedIntToXmlChar(i));
-   	xmlNodePtr intervalnode = xmlNewChild(bucketnode, NULL, BAD_CAST "bucket_interval", NULL);
-    			xmlNewChild(intervalnode, NULL, BAD_CAST "interval_lo", signedIntToXmlChar(lo));
-    			xmlNewChild(intervalnode, NULL, BAD_CAST "interval_hi", signedIntToXmlChar(hi));
-    			xmlNewChild(bucketnode, NULL, BAD_CAST "sum_count", unsignedIntToXmlChar(sum_count));
-	return bucketnode;
-}
-
-xmlNodePtr makeHistogramNode(char *buf, int writehisto, xmlNodePtr node)
-{
-	xmlNodePtr histonode = xmlNewChild(node, NULL, BAD_CAST "histogram", NULL);
-	if (writehisto) xmlNewProp(histonode, BAD_CAST "type", BAD_CAST "write");
-	else xmlNewProp(histonode, BAD_CAST "type", BAD_CAST "read");
-	//extremely low latencies
-		uint64_t *bucket0 = get_histogram_bucket(buf, writehisto, 0);
-		makeBucketNode(histonode, 0, 0, 8, bucket0[0]); 
-	//buckets 1-15
-		int i;
-		uint64_t sum_count;
-		for (i = 1; i < 16; ++i)
-    	{
-    		uint64_t *bucket = get_histogram_bucket(buf, writehisto, i);
-    		sum_count = 0;
-    		int j;
-    		for (j = 0; j < 16; ++j) { sum_count += bucket[j]; }
-    		xmlNodePtr bucketnode = makeBucketNode(histonode, i, i+7, i+8, sum_count); 
-    			xmlNodePtr hexesnode = xmlNewChild(bucketnode, NULL, BAD_CAST "bucket_hexes", NULL);
-    			for (j = 0; j < 16; j++)
-    			{
-    				xmlNodePtr hexnode = xmlNewChild(hexesnode, NULL, BAD_CAST "hex", unsignedIntToXmlChar(bucket[j]));
-    				xmlNewProp(hexnode, BAD_CAST "index", signedIntToXmlChar(j));
-    			}
-    	}
-    //large latencies (bucket 0)
-    	for (i = 0; i < 7; ++i) { makeBucketNode(histonode, 0, i+23, i+24, bucket0[8+i]); }
-    //largest latencies (2^30:32)
-    	makeBucketNode(histonode, 0, 30, 32, bucket0[15]);
-    return histonode;
-}
-
-xmlNodePtr makeSysMemItemNode(xmlNodePtr sysmemnode, char * name, const sys_mem_item *info)
-{
-	xmlNodePtr sysmemitemnode = xmlNewChild(sysmemnode, NULL, BAD_CAST "sys_mem_item", NULL);
-   xmlNewProp(sysmemitemnode, BAD_CAST "name", BAD_CAST name);
-   	xmlNodePtr node = xmlNewChild(sysmemitemnode, NULL, BAD_CAST "mem_item_info", NULL);
-#ifdef _WIN32
-			xmlNewChild(node, NULL, BAD_CAST "AvailPhys", signedIntToXmlChar(sys_stat_mem_get(info, 0)));
-			xmlNewChild(node, NULL, BAD_CAST "dwMemoryLoad", signedIntToXmlChar(sys_stat_mem_get(info, 1)));
-			xmlNewChild(node, NULL, BAD_CAST "TotalPageFile", signedIntToXmlChar(sys_stat_mem_get(info, 2)));
-			xmlNewChild(node, NULL, BAD_CAST "AvailPageFile", signedIntToXmlChar(sys_stat_mem_get(info, 3)));
-			xmlNewChild(node, NULL, BAD_CAST "AvailVirtual", signedIntToXmlChar(sys_stat_mem_get(info, 4)));
-#else
-			xmlNewChild(node, NULL, BAD_CAST "free_kib", signedIntToXmlChar(sys_stat_mem_get(info, 0)));
-			xmlNewChild(node, NULL, BAD_CAST "buffer_kib", signedIntToXmlChar(sys_stat_mem_get(info, 1)));
-			xmlNewChild(node, NULL, BAD_CAST "cache_kib", signedIntToXmlChar(sys_stat_mem_get(info, 2)));
-			xmlNewChild(node, NULL, BAD_CAST "active_kib", signedIntToXmlChar(sys_stat_mem_get(info, 3)));
-			xmlNewChild(node, NULL, BAD_CAST "inactive_kib", signedIntToXmlChar(sys_stat_mem_get(info, 4)));
-			xmlNewChild(node, NULL, BAD_CAST "pgpgin", signedIntToXmlChar(sys_stat_mem_get(info, 5)));
-			xmlNewChild(node, NULL, BAD_CAST "pgpgout", signedIntToXmlChar(sys_stat_mem_get(info, 6)));
-			xmlNewChild(node, NULL, BAD_CAST "pswpin", signedIntToXmlChar(sys_stat_mem_get(info, 7)));
-			xmlNewChild(node, NULL, BAD_CAST "pswpout", signedIntToXmlChar(sys_stat_mem_get(info, 8)));
-			xmlNewChild(node, NULL, BAD_CAST "pgmajfault", signedIntToXmlChar(sys_stat_mem_get(info, 9)));
-#endif
-	return sysmemitemnode;
-}
-
-xmlNodePtr makeMemItemDeltaNode(xmlNodePtr memitemnode, const sys_mem_item *before, const sys_mem_item *after)
-{
-	xmlNodePtr deltanode = xmlNewChild(memitemnode, NULL, BAD_CAST "mem_item_delta", NULL);
-#ifdef _WIN32
-		xmlNewChild(deltanode, NULL, BAD_CAST "AvailPhys", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 0)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "dwMemoryLoad", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 1)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "TotalPageFile", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 2)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "AvailPageFile", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 3)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "AvailVirtual", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 4)));
-#else
-		xmlNewChild(deltanode, NULL, BAD_CAST "free_kib", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 0)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "buffer_kib", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 1)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "cache_kib", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 2)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "active_kib", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 3)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "inactive_kib", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 4)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "pgpgin", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 5)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "pgpgout", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 6)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "pswpin", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 7)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "pswpout", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 8)));
-		xmlNewChild(deltanode, NULL, BAD_CAST "pgmajfault", signedIntToXmlChar(sys_stat_mem_get_delta(before, after, 9)));
-#endif
-	return deltanode;
-}
-
-xmlNodePtr makeOsInfoNode(xmlNodePtr signaturenode, char *hostname)
-{
-	xmlNodePtr osinfonode = xmlNewChild(signaturenode, NULL, BAD_CAST "os_info", NULL);
-   	xmlNewChild(osinfonode, NULL, BAD_CAST "hostname", BAD_CAST hostname);
-   	xmlNodePtr versioninfonode = xmlNewChild(osinfonode, NULL, BAD_CAST "version_info", NULL);
-#ifdef _WIN32
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "os_name", BAD_CAST "windows");
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "arch", BAD_CAST sys_get_cpu_arch());
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "maj", signedIntToXmlChar(sys_get_os_version_value(1)));
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "min", signedIntToXmlChar(sys_get_os_version_value(2)));
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "build", signedIntToXmlChar(sys_get_os_version_value(3)));
-#else
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "os_name", BAD_CAST sys_get_os_version_string(0));
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "arch", BAD_CAST sys_get_cpu_arch());
-			xmlNewChild(versioninfonode, NULL, BAD_CAST "release", BAD_CAST sys_get_os_version_string(4)); 
-#endif
-	return osinfonode;
-}
-
-xmlNodePtr makeTimeInfoNode(xmlNodePtr signaturenode)
-{
-	xmlNodePtr timeinfonode = xmlNewChild(signaturenode, NULL, BAD_CAST "time_info", NULL);
-#ifdef _WIN32
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "date", BAD_CAST sys_get_time_info_string(9));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "time", BAD_CAST sys_get_time_info_string(10));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "year", BAD_CAST sys_get_time_info_string(5));
-#else
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "wday", signedIntToXmlChar(sys_get_time_info_value(6)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "year", signedIntToXmlChar(sys_get_time_info_value(5)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "mon", signedIntToXmlChar(sys_get_time_info_value(4)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "mday", signedIntToXmlChar(sys_get_time_info_value(3)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "hour", signedIntToXmlChar(sys_get_time_info_value(2)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "min", signedIntToXmlChar(sys_get_time_info_value(1)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "sec", signedIntToXmlChar(sys_get_time_info_value(0)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "yday", signedIntToXmlChar(sys_get_time_info_value(7)));
-	xmlNewChild(timeinfonode, NULL, BAD_CAST "isdst", signedIntToXmlChar(sys_get_time_info_value(8)));
-#endif
-	return timeinfonode;
-}
-
-void makeSysMemInfoNode(xmlNodePtr reportnode)
-{
-	sysmeminfonode = xmlNewChild(reportnode, NULL, BAD_CAST "sys_mem_info", NULL);
-	if (params.cold)
-   {
-   	xmlNodePtr prerunnode = makeSysMemItemNode(sysmeminfonode, "pre-run", &mem_info_before_warmup);				//1
-   	if (mem_info_middle_run.recorded)
-		{
-			makeMemItemDeltaNode(prerunnode, &mem_info_before_warmup, &mem_info_middle_run);								//2
-			xmlNodePtr midrunnode = makeSysMemItemNode(sysmeminfonode, "mid-run", &mem_info_middle_run);				//3
-			makeMemItemDeltaNode(midrunnode, &mem_info_middle_run, &mem_info_after_run);									//4
-		}
-		else makeMemItemDeltaNode(prerunnode, &mem_info_before_warmup, &mem_info_after_run);							//5
-   }
-   else 
-   {
-   	xmlNodePtr prewarmupnode = makeSysMemItemNode(sysmeminfonode, "pre-warmup", &mem_info_before_warmup);		//6
-   	makeMemItemDeltaNode(prewarmupnode, &mem_info_before_warmup, &mem_info_before_run);								//7
-   	xmlNodePtr prerunnode = makeSysMemItemNode(sysmeminfonode, "pre-run", &mem_info_before_run);					//8
-   	if (mem_info_middle_run.recorded)
-		{
-			makeMemItemDeltaNode(prerunnode, &mem_info_before_run, &mem_info_middle_run);									//9
-			xmlNodePtr midrunnode = makeSysMemItemNode(sysmeminfonode, "mid-run", &mem_info_middle_run);				//10
-			makeMemItemDeltaNode(midrunnode, &mem_info_middle_run, &mem_info_after_run);									//11
-		}
-		else makeMemItemDeltaNode(prerunnode, &mem_info_before_run, &mem_info_after_run);								//12
-   }
-   postrunnode = makeSysMemItemNode(sysmeminfonode, "post-run", &mem_info_after_run);									//13
-}
-
-xmlNodePtr makeCacheInfoNode(xmlNodePtr machineinfonode, int cachetypes)
-{
-	xmlNodePtr cacheinfonode = xmlNewChild(machineinfonode, NULL, BAD_CAST "cache_info", NULL);
-   if (cachetypes == 0) { xmlNewProp(cacheinfonode, BAD_CAST "deterministic", BAD_CAST "0"); }
-   else 
-   {
-   	xmlNewProp(cacheinfonode, BAD_CAST "deterministic", BAD_CAST "1");
-   	int j;
-  		for (j = 0; j < cachetypes; j++)
-  		{
-  			xmlNodePtr cachenode = xmlNewChild(cacheinfonode, NULL, BAD_CAST "cache", NULL);
-  				xmlNewProp(cachenode, BAD_CAST "type", BAD_CAST get_cache_type(j));
-   			xmlNewChild(cachenode, NULL, BAD_CAST "level", signedIntToXmlChar(get_cache_info(j, 4)));
-   			xmlNewChild(cachenode, NULL, BAD_CAST "capacity", signedIntToXmlChar(get_cache_info(j, 5))); 
-   			xmlNewChild(cachenode, NULL, BAD_CAST "sets", signedIntToXmlChar(get_cache_info(j, 0))); 
-   			xmlNewChild(cachenode, NULL, BAD_CAST "linesize", signedIntToXmlChar(get_cache_info(j, 1))); 
-   			xmlNewChild(cachenode, NULL, BAD_CAST "partitions", signedIntToXmlChar(get_cache_info(j, 2))); 
-   			xmlNewChild(cachenode, NULL, BAD_CAST "ways", signedIntToXmlChar(get_cache_info(j, 3)));
-   	}
-   }
-   return cacheinfonode;
- }
- 
-xmlNodePtr makeTlbInfoNode(xmlNodePtr machineinfonode, int tlblength)
-{
-	xmlNodePtr tlbinfonode = xmlNewChild(machineinfonode, NULL, BAD_CAST "tlb_info", NULL);
-	int j;
-	for (j = 0; j < tlblength; j++)
-	{
-		xmlNodePtr tlbitemnode = xmlNewChild(tlbinfonode, NULL, BAD_CAST "tlb_item", NULL);
-			xmlNewProp(tlbitemnode, BAD_CAST "index", unsignedIntToXmlChar(j));
-			xmlNewProp(tlbitemnode, BAD_CAST "id", byteToXmlChar(get_tlb_info(j)));
-			//do something to get the actual contents here... will take a while to xmlify
-	}
-	return tlbinfonode;
-}
-#endif
 
 void
 __attribute__((cold))
-print_report(char* buf, const parameters* p)
+print_con_report(char* buf, const parameters* p)
 {
-	printf("\n------------- Benchmark signature -------------\n");
-	//signature
-		//pmbench_info
-   		sys_print_pmbench_info();
-#ifdef PMB_XML
-			xmlNodePtr reportnode = NULL, signaturenode = NULL;
-   		if (p->xml) 
-			{
-				LIBXML_TEST_VERSION;
-				doc = xmlNewDoc(BAD_CAST "1.0");
-    			pmbenchmarknode = xmlNewDocNode(doc, NULL, BAD_CAST "pmbenchmark", NULL);
-    			
-    			xmlDocSetRootElement(doc, pmbenchmarknode);
-    				reportnode = xmlNewChild(pmbenchmarknode, NULL, BAD_CAST "report", NULL);
-    					signaturenode = xmlNewChild(reportnode, NULL, BAD_CAST "signature", NULL);
-							xmlNodePtr pmbenchinfonode = xmlNewChild(signaturenode, NULL, BAD_CAST "pmbench_info", NULL);
-								xmlNewChild(pmbenchinfonode, NULL, BAD_CAST "version_number", BAD_CAST pmbench_version);
-								xmlNewChild(pmbenchinfonode, NULL, BAD_CAST "version_options", BAD_CAST COMPILE_OPT_TAGS);
-								xmlNewChild(pmbenchinfonode, NULL, BAD_CAST "version_xmloutput", BAD_CAST xmloutput_version);
-			}
-		//os_info
-   		char *hostname = 
-#endif
-   		sys_print_hostname(); //you must call this for any of the below get functions to work
-   		//version_info
+    printf("\n------------- Benchmark signature -------------\n");
+    //signature
+    //pmbench_info
+    sys_print_pmbench_info();
+
+    //os_info
+    sys_print_hostname(); //you must call this for any of the below get functions to work
+
+    //version_info
 #ifdef _WIN32
-				printf("OS/kernel type : Windows %s version %d.%d (build %d)\n", sys_get_cpu_arch(), sys_get_os_version_value(1), sys_get_os_version_value(2), sys_get_os_version_value(3));
+    printf("OS/kernel type : Windows %s version %d.%d (build %d)\n", 
+	    sys_get_cpu_arch(), 
+	    sys_get_os_version_value(1), 
+	    sys_get_os_version_value(2), 
+	    sys_get_os_version_value(3));
 #else
-				printf("OS/kernel type : %s %s %s\n", sys_get_os_version_string(0), sys_get_os_version_string(4), sys_get_cpu_arch());
-#endif
-#ifdef PMB_XML
-   			if (p->xml) { makeOsInfoNode(signaturenode, hostname); }
-   	//time_info
-	    	int goodtime = 
-#endif
-			sys_print_time_info();
-#ifdef PMB_XML
-	    	if (p->xml && goodtime) { makeTimeInfoNode(signaturenode); }
-	  //uuid
-	    	char * uuid = 
-#endif
-    		sys_print_uuid();
-#ifdef PMB_XML
-    		if (p->xml)  {  xmlNewChild(signaturenode, NULL, BAD_CAST "uuid", BAD_CAST uuid);  }
-#endif
-		//params
-    		printf("Parameters used:\n");
-    		print_params(p);
-#ifdef PMB_XML
-    		if (p->xml) { makeParamsNode(p, signaturenode); }
-#endif
-    	if (control.interrupted)
-    	{
-#ifdef PMB_XML
-    		if (p->xml) { xmlNewChild(signaturenode, NULL, BAD_CAST "interrupted", BAD_CAST "1"); }
-#endif
-    		printf("\nNote: User interruption ended the benchmark earlier than scheduled.\n");
-    	}
-
-	//machine_info
-#ifdef PMB_XML
-		xmlNodePtr machineinfonode = NULL;
-#endif
-   	printf("\n------------- Machine information -------------\n");
-   	{
-    		char modelstr[48];
-			if (__cpuid_obtain_model_string(modelstr)) 
-			{
-#ifdef PMB_XML
-				if (p->xml) 
-				{ 
-					machineinfonode = xmlNewChild(reportnode, NULL, BAD_CAST "machine_info", NULL);
-					xmlNewChild(machineinfonode, NULL, BAD_CAST "modelname", BAD_CAST modelstr);
-				}
-#endif
-				printf("CPU model name: %s\n", modelstr);
-			} 
-			else 
-			{
-#ifdef PMB_XML
-				if (p->xml)
-				{ 
-					machineinfonode = xmlNewChild(reportnode, NULL, BAD_CAST "machine_info", NULL);
-					xmlNewChild(machineinfonode, NULL, BAD_CAST "modelname", BAD_CAST "unsupported"); 
-				}
-#endif
-				printf("CPU model string unsupported.\n");
-			}
-   	}
-    	//freq_khz
-    		printf("rdtsc/perfc frequency: %u K cycles per second\n", freq_khz);   		
-#ifdef PMB_XML
-    		if (p->xml) { xmlNewChild(machineinfonode, NULL, BAD_CAST "freq_khz", unsignedIntToXmlChar(freq_khz)); }
+    printf("OS/kernel type : %s %s %s\n", 
+	    sys_get_os_version_string(0), 
+	    sys_get_os_version_string(4), 
+	    sys_get_cpu_arch());
 #endif
 
-		//tlb_info
-			printf(" -- TLB info --\n");
-#ifdef PMB_XML
-			int tlblength = 
-#endif
-			print_tlb_info();
-#ifdef PMB_XML
-			if (p->xml) { makeTlbInfoNode(machineinfonode, tlblength); }
-#endif
-   	//cache_info
-   	 	printf(" -- Cache info --\n");
-#ifdef PMB_XML
-   	 	int cachetypes = 
-#endif
-			print_cache_info(tlblength);
-#ifdef PMB_XML
-   	 	if (p->xml) { makeCacheInfoNode(machineinfonode, cachetypes); }
-#endif
+    //time_info
+    sys_print_time_info();
+
+    //uuid
+    sys_print_uuid();
+
+    //params
+    printf("Parameters used:\n");
+    print_params(p);
+    if (control.interrupted) {
+	printf("\nNote: User interruption ended the benchmark earlier than scheduled.\n");
+    }
+
+    //machine_info
+    printf("\n------------- Machine information -------------\n");
+    {
+	char modelstr[48];
+	if (__cpuid_obtain_model_string(modelstr)) {
+	    printf("CPU model name: %s\n", modelstr);
+	} else {
+	    printf("CPU model string unsupported.\n");
+	}
+    }
+
+    //freq_khz
+    printf("rdtsc/perfc frequency: %u K cycles per second\n", freq_khz);   		
+
+    //tlb_info
+    printf(" -- TLB info --\n");
+    print_tlb_info();
+    
+    //cache_info
+    printf(" -- Cache info --\n");
+    print_cache_info();
+
     //result
-    	printf("\n----------- Average access latency ------------\n");
-    	print_result();
-#ifdef PMB_XML
-    	if (p->xml) { makeResultNode(reportnode); }
-#endif
+    printf("\n----------- Average access latency ------------\n");
+    print_result();
+    
     //statistics
-    	printf("\n----------------- Statistics ------------------\n");
-    	p->access->report(buf, p->ratio);
-#ifdef PMB_XML
-    	if (p->xml && p->access == &histogram_access)
-    	{
-    		xmlNodePtr statisticsnode = xmlNewChild(reportnode, NULL, BAD_CAST "statistics", NULL);
-			if (p->ratio > 0) 	{ makeHistogramNode(buf, 0, statisticsnode); }
-			if (p->ratio < 100) 	{ makeHistogramNode(buf, 1, statisticsnode); }
-    	}
-#endif
+    printf("\n----------------- Statistics ------------------\n");
+    p->access->report(buf, p->ratio);
+    
     //sys_mem_info
-    	printf("\n---------- System memory information ----------\n");
-		sys_stat_mem_print_header();
-		if (params.cold)
-    	{
-			printf("pre-run   :"); sys_stat_mem_print(&mem_info_before_warmup);														//1
-			printf("  (delta) :");
-			if (mem_info_middle_run.recorded)
-			{
-				sys_stat_mem_print_delta(&mem_info_before_warmup, &mem_info_middle_run);											//2
-				printf("mid-run   :"); sys_stat_mem_print(&mem_info_middle_run);														//3
-				printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_middle_run, &mem_info_after_run);					//4
-			}
-			else sys_stat_mem_print_delta(&mem_info_before_warmup, &mem_info_after_run);											//5
-   	 }
-   	 else
-   	 {
-			printf("pre-warmup:"); sys_stat_mem_print(&mem_info_before_warmup);														//6
-			printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_before_warmup, &mem_info_before_run);					//7
-			printf("pre-run   :"); sys_stat_mem_print(&mem_info_before_run);															//8
-			printf("  (delta) :");
-			if (mem_info_middle_run.recorded)
-			{
-				sys_stat_mem_print_delta(&mem_info_before_run, &mem_info_middle_run);												//9
-				printf("mid-run   :"); sys_stat_mem_print(&mem_info_middle_run);														//10
-				printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_middle_run, &mem_info_after_run);					//11
-			}
-			else sys_stat_mem_print_delta(&mem_info_before_run, &mem_info_after_run);												//12
-   	}
-   	printf("post-run  :"); sys_stat_mem_print(&mem_info_after_run);																//13
-#ifdef PMB_XML		
-		if (p->xml) { makeSysMemInfoNode(reportnode); }
-#endif
-		//continued in main
+    printf("\n---------- System memory information ----------\n");
+    sys_stat_mem_print_header();
+    if (params.cold) {
+	printf("pre-run   :"); sys_stat_mem_print(&mem_info_before_warmup);//1
+	printf("  (delta) :");
+	if (mem_info_middle_run.recorded) {
+	    sys_stat_mem_print_delta(&mem_info_before_warmup, &mem_info_middle_run);//2
+	    printf("mid-run   :"); sys_stat_mem_print(&mem_info_middle_run);	//3
+	    printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_middle_run, &mem_info_after_run);	//4
+	}
+	else sys_stat_mem_print_delta(&mem_info_before_warmup, &mem_info_after_run); //5
+    } else {
+	printf("pre-warmup:"); sys_stat_mem_print(&mem_info_before_warmup);//6
+	printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_before_warmup, &mem_info_before_run);	//7
+	printf("pre-run   :"); sys_stat_mem_print(&mem_info_before_run);	//8
+	printf("  (delta) :");
+	if (mem_info_middle_run.recorded) {
+	    sys_stat_mem_print_delta(&mem_info_before_run, &mem_info_middle_run);//9
+	    printf("mid-run   :"); sys_stat_mem_print(&mem_info_middle_run);	//10
+	    printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_middle_run, &mem_info_after_run);	//11
+	}
+	else sys_stat_mem_print_delta(&mem_info_before_run, &mem_info_after_run);//12
+    }
+    printf("post-run  :"); sys_stat_mem_print(&mem_info_after_run);		//13
 }
 
 #define MAX_ALARM 4
@@ -1001,12 +539,12 @@ void _code alarm_check(uint64_t now)
 {
     int i;
     for (i = 0; i < MAX_ALARM; ++i) {
-		if (alarms[i].time == 0ull) continue;
-		if (alarms[i].time <= now) {
-			// time is cleared first to allow callback re-register at the same slot
-			alarms[i].time = 0ull;
-			alarms[i].callback(now, alarms[i].data);
-		}
+	if (alarms[i].time == 0ull) continue;
+	if (alarms[i].time <= now) {
+	    // time is cleared first to allow callback re-register at the same slot
+	    alarms[i].time = 0ull;
+	    alarms[i].callback(now, alarms[i].data);
+	}
     }
 }
 
@@ -1053,11 +591,13 @@ void thread_sync(int syncpoint) {
     return;
 }
 
+/*
+ * access address = ( base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
+ */
 static inline 
 uint32_t* get_access_address(char *buf, size_t pfn, uint32_t offset)
 {
-    return (uint32_t*) (buf + (pfn << PAGE_SHIFT) + (offset) * sizeof(uint32_t)); 
-    //access address = ( base address of map + (page number << 12) + (10 bit random number) * sizeof(u32) )
+    return (uint32_t*)(buf + (pfn << PAGE_SHIFT) + (offset) * sizeof(uint32_t));
 }
 
 /**
@@ -1370,9 +910,9 @@ int install_ctrlc_handler(void)
     ret = sigaction(SIGINT, &sa, &sa_saved);
 
     if (ret == -1) {
-		prn("%s: sigint handler installation failed\n", __func__);
-		perror("sigaction call failed\n");
-		exit(EXIT_FAILURE);
+	prn("%s: sigint handler installation failed\n", __func__);
+	perror("sigaction call failed\n");
+	exit(EXIT_FAILURE);
     }
     return ret;
 }
@@ -1409,12 +949,16 @@ void disable_core_dump(void)
 {
     struct rlimit rlim = {.rlim_cur = 0, .rlim_max = 0 };
     int res;
+
     res = setrlimit(RLIMIT_CORE, &rlim);
     if (res != 0) {
     	perror("failed to set core dump size to zero\n");
     }
 }
 #endif
+
+extern void print_xml_report(char* buf, const parameters* p, int is_interrupted);
+extern void print_xml_report_post_unmap(const char* path);
 
 /*
  * N.B. mingw32 intercepts WinMain and prepares argc and argv
@@ -1445,14 +989,14 @@ int main(int argc, char** argv)
     	SYSTEM_INFO sysinfo;
     	GetNativeSystemInfo(&sysinfo);
     	if (sysinfo.dwPageSize != 4096) {
-    		prn("ERROR: system page size is not 4K.\n");
-    		return 1;
+	    prn("ERROR: system page size is not 4K.\n");
+	    return 1;
     	}
     }
     perfc_ops.init_base_freq(&perfc_ops);
 #else
     if (sysconf(_SC_PAGESIZE) != 4096) {
-		prn("ERROR: system page size is not 4K.\n");
+	prn("ERROR: system page size is not 4K.\n");
     	return 1;
     }
 #endif
@@ -1473,8 +1017,8 @@ int main(int argc, char** argv)
     	xalloc_init_context(ctx);
 
     	if (xalloc_attach_device(ctx, params.xalloc_path)) {
-    		prn("attaching device failed: %s\n", params.xalloc_path);
-    		return 1;
+	    prn("attaching device failed: %s\n", params.xalloc_path);
+	    return 1;
     	}
     	/* xmmap memory size in # of 4K pages, not byte size */
     	size_t p_pgcount = params.xalloc_mib << (20 - PAGE_SHIFT);
@@ -1483,8 +1027,8 @@ int main(int argc, char** argv)
     	buf = xmmap(ctx, map_num_pfn, p_pgcount, XALLOC_MAP_ATTR_READWRITE);
 
     	if (buf == XMMAP_FAILED) {
-    		perror("xmmap failed");
-    		return 1;
+	    perror("xmmap failed");
+	    return 1;
     	}
 
     	// xmmap returns memory unscrubbed. zero out the memory.
@@ -1495,36 +1039,11 @@ int main(int argc, char** argv)
 	buf = VirtualAlloc(NULL, map_num_pfn * PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	if (buf == NULL) {
 	    ret = GetLastError();
-		prn("VirtualAlloc failed. Error:%d\n", ret);
-		prn("sizeof(map_num_pfn):%d, map_num_pfn:%ld, map_num_pfn*PAGE_SIZE:%"PRIu64"\n", sizeof(map_num_pfn), map_num_pfn, map_num_pfn * PAGE_SIZE);
+	    prn("VirtualAlloc failed. Error:%d\n", ret);
+	    prn("sizeof(map_num_pfn):%d, map_num_pfn:%ld, map_num_pfn*PAGE_SIZE:%"PRIu64"\n", sizeof(map_num_pfn), map_num_pfn, map_num_pfn * PAGE_SIZE);
 	    return 1;
 	}
 
-/*
-	HANDLE handl = CreateFileMapping
-	(
-		INVALID_HANDLE_VALUE,
-		NULL,
-		PAGE_READWRITE | SEC_COMMIT | SEC_NOCACHE,
-		(uint32_t)((map_num_pfn * PAGE_SIZE) >> 32),
-		(uint32_t)(map_num_pfn * PAGE_SIZE),
-		"pmbenchMapObject"
-	);
-	if (handl == NULL)
-	{
-		ret = GetLastError();
-		printf("Create file mapping error: %d\n", ret);
-		exit(1);
-	}	
-	buf = (char *)MapViewOfFile(handl, FILE_MAP_ALL_ACCESS, 0, 0, map_num_pfn * PAGE_SIZE);
-	if (buf == NULL)
-	{
-		ret = GetLastError();
-		printf("Map view of file error: %d\n", ret); //error 6 == invalid handle
-		exit(1);
-	}
-	//memset(buf, 0x00, map_num_pfn * PAGE_SIZE);
-*/
 	stats = VirtualAlloc(NULL, 4096 * params.jobs, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	if (stats == NULL) {
 	    ret = GetLastError();
@@ -1534,42 +1053,44 @@ int main(int argc, char** argv)
 	
 #else
 	int permissions = PROT_READ;
-	if (params.ratio < 100) { permissions |= PROT_WRITE; }
-	buf = mmap(NULL, map_num_pfn * PAGE_SIZE, permissions, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (params.ratio < 100) permissions |= PROT_WRITE; 
+
+	buf = mmap(NULL, map_num_pfn * PAGE_SIZE, permissions, 
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (buf == MAP_FAILED) {
 	    perror("buf mmap failed");
 	    return 1;
 	}
-	stats = mmap(NULL, (size_t)(4096 * params.jobs), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); //1 page per thread; read and write statistics get 2k each
+	// memory for histogram. 1 page per thread; read and write statistics get 2k each
+	stats = mmap(NULL, (size_t)(4096 * params.jobs), 
+		PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); 
 	if (stats == MAP_FAILED) {
 	    perror("stats mmap failed");
 	    return 1;
 	}
 #endif
-	//XXX fill in garbage to beat compression/dedup
-	if (params.init_garbage)
-	{
-		prn("Initializing memory map...\n");
-		int i, j;
-		uint64_t state = 0x0ddfadedbeefd00d;
-		uint32_t val;
-		struct stopwatch sw_init;
-		sw_reset(&sw_init, params.tsops);
-		sw_start(&sw_init);
-		for (i = 0; i < map_num_pfn; i++) 
-		{
-			for (j = 0; j < PAGE_SIZE; j+=4) 
-			{
-				state = state * 6364136223846793005ull + 1442695040888963407ull;
-				val = (uint32_t)(state >> 33);
-				buf[i*PAGE_SIZE + j] = val;
-			}
+	//XXX fill in garbage 
+	if (params.init_garbage) {
+	    prn("Initializing memory map...\n");
+	    int i, j;
+	    uint64_t state = 0x0ddfadedbeefd00d;
+	    uint32_t val;
+	    struct stopwatch sw_init;
+	    sw_reset(&sw_init, params.tsops);
+	    sw_start(&sw_init);
+	    for (i = 0; i < map_num_pfn; i++) {
+		for (j = 0; j < PAGE_SIZE; j+=4) {
+		    state = state * 6364136223846793005ull + 1442695040888963407ull;
+		    val = (uint32_t)(state >> 33);
+		    buf[i*PAGE_SIZE + j] = val;
 		}
-		sw_stop(&sw_init);
-		prn("Initialization took %0.4f ms\n", ((float)sw_get_usec(&sw_init))/1000.0);
+	    }
+	    sw_stop(&sw_init);
+	    prn("Initialization took %0.4f ms\n", ((float)sw_get_usec(&sw_init))/1000.0);
 	}
 #ifdef _WIN32
-	else prn("WARNING: Windows 10's memory compression is known to produce inaccurate results without initialization.\n");
+	else prn("WARNING: uninitialized memory causes side effect on" 
+		" OS with memory compression and deduplication.\n");
 #endif
 #ifdef XALLOC
     }
@@ -1584,7 +1105,12 @@ int main(int argc, char** argv)
 #else
     perform_benchmark_st(buf, stats);
 #endif
-    print_report(stats, &params);
+
+    print_con_report(stats, &params);
+#ifdef PMB_XML
+    if (params.xml) print_xml_report(stats, &params, control.interrupted);
+#endif
+
     free(control.tinfo);
 #ifdef _WIN32
 #ifdef XALLOC
@@ -1609,20 +1135,6 @@ int main(int argc, char** argv)
 	    prn("VirtualFree stats failed. Error:%d", ret);
 	    goto report_no_unmap;
 	}
-/*
-    if (!UnmapViewOfFile(buf))
-    {
-	    ret = GetLastError();
-	    prn("Unmap view of file error: %d\n", ret);
-	    goto report_no_unmap;
-    }
-    if (!CloseHandle(handl))
-    {
-	    ret = GetLastError();
-	    prn("Close handle error: %d\n", ret);
-	    goto report_no_unmap;
-    }
-*/
 
 #ifdef XALLOC
     }
@@ -1630,11 +1142,11 @@ int main(int argc, char** argv)
 #else
 #ifdef XALLOC
     if (params.xalloc_mib) {
-		ret = xunmap(ctx);
-		if (ret) {
-			perror("xunmap failed");
-			goto report_no_unmap;
-		}
+	ret = xunmap(ctx);
+	if (ret) {
+	    perror("xunmap failed");
+	    goto report_no_unmap;
+	}
     } else {
 #endif
 	ret = munmap(buf, map_num_pfn * PAGE_SIZE);
@@ -1645,9 +1157,9 @@ int main(int argc, char** argv)
 	}
 
 	ret = munmap(stats, (size_t)(4096 * params.jobs));
-	if (ret)
-	{	perror("stats munmap failed");
-		goto report_no_unmap;
+	if (ret) {
+	    perror("stats munmap failed");
+	    goto report_no_unmap;
 	}
 #ifdef XALLOC
     }
@@ -1656,35 +1168,29 @@ int main(int argc, char** argv)
     sys_stat_mem_update(&mem_ctx, &mem_info_after_unmap);
     printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_after_run, &mem_info_after_unmap);
     printf("post unmap:"); sys_stat_mem_print(&mem_info_after_unmap);
+
 #ifdef PMB_XML
-    if (params.xml)
-    {
-    	makeMemItemDeltaNode(postrunnode, &mem_info_after_run, &mem_info_after_unmap);
-    	makeSysMemItemNode(sysmeminfonode, "post-unmap", &mem_info_after_unmap);
-    	xmlKeepBlanksDefault(0); //try moving this up
-    	xmlSaveFormatFileEnc(params.xml_path, doc, "utf-8", 1);
-    }
+    if (params.xml) print_xml_report_post_unmap(params.xml_path);
 #endif
+
     sys_stat_mem_exit(&mem_ctx);
 
 #ifdef XALLOC
     if (params.xalloc_mib) {
-		if (xalloc_detach_device(ctx)) prn("detach_device() failed\n");
-
-		if (xalloc_destroy_context(ctx)) prn("destroy_context() failed\n");
+	if (xalloc_detach_device(ctx)) prn("detach_device() failed\n");
+	if (xalloc_destroy_context(ctx)) prn("destroy_context() failed\n");
     }
 #endif
 
-    	remove_ctrlc_handler();
-    	return 0;
+    remove_ctrlc_handler();
+    return 0;
 
 report_no_unmap:
 
 #ifdef XALLOC
     if (params.xalloc_mib) {
-		if (xalloc_detach_device(ctx)) prn("detach_device() failed\n");
-
-		if (xalloc_destroy_context(ctx)) prn("destroy_context() failed\n");
+	if (xalloc_detach_device(ctx)) prn("detach_device() failed\n");
+	if (xalloc_destroy_context(ctx)) prn("destroy_context() failed\n");
     }
 #endif
     sys_stat_mem_exit(&mem_ctx);

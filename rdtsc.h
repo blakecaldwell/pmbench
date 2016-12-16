@@ -32,17 +32,18 @@
 #ifdef __MSVC__
 #error "Need gcc compiler (e.g., mingw32)"
 #endif
+#include <inttypes.h>
 static inline
-unsigned long long rdtsc(void) __attribute__((always_inline));
+uint64_t rdtsc(void) __attribute__((always_inline));
 
 static inline
-unsigned long long rdtscp(void) __attribute__((always_inline));
+uint64_t rdtscp(void) __attribute__((always_inline));
 
 #if defined(__i386__)
 static inline
-unsigned long long rdtsc(void) 
+uint64_t rdtsc(void) 
 {
-    unsigned long long val; 
+    uint64_t val;
 
     asm volatile ( "rdtsc" : "=A"(val));
 
@@ -50,9 +51,9 @@ unsigned long long rdtsc(void)
 }
 
 static inline
-unsigned long long rdtscp(void) 
+uint64_t rdtscp(void) 
 {
-    unsigned long long val; 
+    uint64_t val;
 
     asm volatile ( "rdtscp" : "=A"(val));
 
@@ -60,23 +61,23 @@ unsigned long long rdtscp(void)
 }
 #elif defined(__x86_64__)
 static inline
-unsigned long long rdtsc(void) 
+uint64_t rdtsc(void) 
 {
-    unsigned eax, edx; 
+    uint32_t eax, edx;
 
     asm volatile ( "rdtsc" : "=a"(eax), "=d"(edx) );
 
-    return (unsigned long long)eax | (((unsigned long long)edx) << 32);
+    return (uint64_t)eax | (((uint64_t)edx) << 32);
 }
 
 static inline
-unsigned long long rdtscp(void) 
+uint64_t rdtscp(void) 
 {
-    unsigned eax, edx; 
+    uint32_t eax, edx;
 
     asm volatile ( "rdtscp" : "=a"(eax), "=d"(edx) );
 
-    return (unsigned long long)eax | (((unsigned long long)edx) << 32);
+    return (uint64_t)eax | (((uint64_t)edx) << 32);
 }
 #endif
 

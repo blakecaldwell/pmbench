@@ -39,9 +39,9 @@ typedef double fp_t;
 #endif
 
 typedef struct pattern_generator {
-    void* (*alloc_pattern)(long size, fp_t param1, unsigned int random_seed);
-    long (*get_next)(void* ctx);
-    long (*get_warmup_run)(void* ctx);
+    void * (*alloc_pattern)(size_t size, fp_t param1, uint32_t random_seed);
+    size_t (*get_next)(void* ctx);
+    size_t (*get_warmup_run)(void* ctx);
     int (*free_pattern)(void* ctx);
     const char* name;
     const char* description;
@@ -54,4 +54,8 @@ extern pattern_generator pareto_pattern;
 extern pattern_generator zipf_pattern;
 
 extern pattern_generator* get_pattern_from_name(const char* str);
+
+typedef uint32_t (*get_pattern_fn)(uint64_t *); //extern uint32_t (*get_offset_function(int n))(uint64_t *);
+extern get_pattern_fn get_offset_function(int n);
+extern get_pattern_fn get_accesstype_function(int n);
 #endif

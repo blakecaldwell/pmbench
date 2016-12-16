@@ -1,5 +1,8 @@
 #ifndef __ACCESS_H__
 #define __ACCESS_H__
+
+#include <inttypes.h>
+
 /*
    Copyright (c) 2014, Intel Corporation
    All rights reserved.
@@ -32,10 +35,11 @@
 /* Written by: Jisoo Yang <jisoo.yang (at) unlv.edu> */
 
 typedef struct access_fn_set {
-    int (*warmup)(char* buf, size_t pfn);		// callback for warmup touch
-    int (*exercise)(char* buf, size_t pfn);	// main touch function
-    int (*finish)(char* buf, size_t num_pages);	// compile stat results
-    void (*report)(char* buf);	// print results
+    uint32_t (*exercise_read)(uint32_t *ptr); // main touch function
+    uint32_t (*exercise_write)(uint32_t *ptr);
+    void (*record)(char *stats, uint32_t elapsed_nsec, int is_write);
+    void (*finish)(char *buf, int num_threads);	// compile stat results
+    void (*report)(char *buf, int ratio);	// print results
     const char* name;
     const char* description;
 } access_fn_set;
@@ -44,5 +48,7 @@ extern access_fn_set touch_access;
 extern access_fn_set histogram_access;
 
 extern access_fn_set* get_access_from_name(const char* str);
+
+extern uint64_t * get_histogram_bucket(char *buf, int is_write, int bucketnum);
 
 #endif

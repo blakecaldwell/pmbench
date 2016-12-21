@@ -55,29 +55,33 @@ uint64_t rdtscp(void)
 {
     uint64_t val;
 
-    asm volatile ( "rdtscp" : "=A"(val));
+    asm volatile ( "rdtscp" : "=A"(val) :: "ecx" );
 
     return val;
 }
 #elif defined(__x86_64__)
+/*
+ * According to Intel IDM, high 32 bits of rax, rdx, (and rcx in case of rdtscp)
+ * are zeroed.
+ */
 static inline
 uint64_t rdtsc(void) 
 {
-    uint32_t eax, edx;
+    uint64_t rax, rdx;
 
-    asm volatile ( "rdtsc" : "=a"(eax), "=d"(edx) );
+    asm volatile ( "rdtsc" : "=a"(rax), "=d"(rdx) );
 
-    return (uint64_t)eax | (((uint64_t)edx) << 32);
+    return rax | (rdx << 32);
 }
 
 static inline
 uint64_t rdtscp(void) 
 {
-    uint32_t eax, edx;
+    uint64_t rax, rdx;
 
-    asm volatile ( "rdtscp" : "=a"(eax), "=d"(edx) );
+    asm volatile ( "rdtscp" : "=a"(rax), "=d"(rdx) : : "rcx" );
 
-    return (uint64_t)eax | (((uint64_t)edx) << 32);
+    return rax | (rdx << 32);
 }
 #endif
 

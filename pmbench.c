@@ -451,7 +451,7 @@ print_con_report(char* buf, const parameters* p)
     printf("\n------------- Machine information -------------\n");
     {
 	char modelstr[48];
-	if (__cpuid_obtain_model_string(modelstr)) {
+	if (__cpuid_obtain_brand_string(modelstr)) {
 	    printf("CPU model name: %s\n", modelstr);
 	} else {
 	    printf("CPU model string unsupported.\n");

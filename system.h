@@ -123,7 +123,7 @@ uint64_t sys_delay(int min_clk)
 
 extern int is_rdtscp_available(void);
 extern int is_tsc_invariant(void);
-extern int __cpuid_obtain_model_string(char* buf);
+extern int __cpuid_obtain_brand_string(char* buf);
 
 /*
  * Ok. the only reason this is locally implemented is

@@ -65,53 +65,55 @@ struct cpuid_struct {
     uint32_t leaf_pop, leaf_ex_pop;
     struct {
     	uint32_t r[4];
-    } leaf[16], leaf_ex[10];
+    } leaf[32], leaf_ex[10];
 }; 
 
-static struct cpuid_struct cpuid_local = {
+static struct cpuid_struct _cpuid = {
     .leaf_pop = 0u,
     .leaf_ex_pop = 0u,
 };
 
 
-static void cpuid_populate_local_leaf(uint32_t idx)
+static
+void cpuid_populate_local_leaf(uint32_t idx)
 {
     idx &= 0x0f;
     static const int A = 0, B = 1, C = 2, D = 3;
-    uint32_t *r = cpuid_local.leaf[idx].r;
+    uint32_t *r = _cpuid.leaf[idx].r;
 
     r[A] = idx;
     r[C] = 0;
     _sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
-    cpuid_local.leaf_pop |= (1u << idx);
+    _cpuid.leaf_pop |= (1u << idx);
 }
 
 static inline
 int is_leaf_supported_idx(uint32_t idx)
 {
-    uint32_t eax = idx & 0x0f;
+    uint32_t eax = idx & 0xff;
 
-    if (eax >= 0x0E) return 0;
-    if (!(cpuid_local.leaf_pop & 0x01)) cpuid_populate_local_leaf(0);
+    if (eax >= 0x18) return 0;	    /* as of IDM Sep 2016 */
+    if (!(_cpuid.leaf_pop & 0x01)) cpuid_populate_local_leaf(0);
 
-    if (cpuid_local.leaf[0].r[0] < eax) return 0;
+    if (_cpuid.leaf[0].r[0] < eax) return 0;
 
     return 1;
 }
 
-static void cpuid_populate_local_leaf_ex(uint32_t idx)
+static
+void cpuid_populate_local_leaf_ex(uint32_t idx)
 {
     static const int A = 0, B = 1, C = 2, D = 3;
-    uint32_t *r = cpuid_local.leaf_ex[idx & 0x0f].r;
+    uint32_t *r = _cpuid.leaf_ex[idx & 0x0f].r;
 
     r[A] = 0x80000000 | idx;
     r[C] = 0;
     _sys_cpuid(&r[A], &r[B], &r[C], &r[D]);
-    cpuid_local.leaf_ex_pop |= (1u << (idx & 0x0f));
+    _cpuid.leaf_ex_pop |= (1u << (idx & 0x0f));
 }
 
 /*
- * ex_idx can be either 0x800000idx or idx
+ * ex_idx can be specified either as 0x800000idx or idx
  */
 static
 int is_leaf_ex_supported_idx(uint32_t ex_idx)
@@ -119,10 +121,10 @@ int is_leaf_ex_supported_idx(uint32_t ex_idx)
     uint32_t eax = 0x80000000u | ex_idx;
     ex_idx &= 0x0f; 
 
-    if (eax >= 0x8000000A) return 0;
-    if (!(cpuid_local.leaf_ex_pop & 0x01)) cpuid_populate_local_leaf_ex(0);
+    if (eax >= 0x80000009) return 0;  /* as of IDM Sep 2016 */
+    if (!(_cpuid.leaf_ex_pop & 0x01)) cpuid_populate_local_leaf_ex(0);
 
-    if (cpuid_local.leaf_ex[0].r[0] < eax) return 0;
+    if (_cpuid.leaf_ex[0].r[0] < eax) return 0;
 
     return 1;
 }
@@ -133,12 +135,12 @@ int is_rdtscp_available(void)
 {
     if (!is_leaf_ex_supported_idx(1)) return 0;
 
-    if (!(cpuid_local.leaf_ex_pop & (1 << 1))) {
+    if (!(_cpuid.leaf_ex_pop & (1 << 1))) {
 	cpuid_populate_local_leaf_ex(1);
     }
     
     /* bit 27 of EDX */
-    if (cpuid_local.leaf_ex[1].r[3] & (1u << 27)) return 1;
+    if (_cpuid.leaf_ex[1].r[3] & (1u << 27)) return 1;
     return 0;
 }
 
@@ -146,11 +148,11 @@ int is_tsc_invariant(void)
 {
     if (!is_leaf_ex_supported_idx(7)) return 0;
 
-    if (!(cpuid_local.leaf_ex_pop & (1 << 7))) {
+    if (!(_cpuid.leaf_ex_pop & (1 << 7))) {
 	cpuid_populate_local_leaf_ex(7);
     }
     /* bit 8 of EDX */
-    if (cpuid_local.leaf_ex[7].r[3] & 0x100) return 1;
+    if (_cpuid.leaf_ex[7].r[3] & 0x100) return 1;
     return 0;
 }
 
@@ -159,7 +161,7 @@ int is_tsc_invariant(void)
  * This functions strips away the leading white spaces.
  * returns 0 when string is unsupported.
  */
-int __cpuid_obtain_model_string(char* buf)
+int __cpuid_obtain_brand_string(char* buf)
 {
     char* src, *buf_start = buf;
 
@@ -167,17 +169,17 @@ int __cpuid_obtain_model_string(char* buf)
 	buf[0] = 0;
 	return 0;
     }
-    if (!(cpuid_local.leaf_ex_pop & (1 << 2))) cpuid_populate_local_leaf_ex(2);
-    if (!(cpuid_local.leaf_ex_pop & (1 << 3))) cpuid_populate_local_leaf_ex(3);
-    if (!(cpuid_local.leaf_ex_pop & (1 << 4))) cpuid_populate_local_leaf_ex(4);
+    if (!(_cpuid.leaf_ex_pop & (1 << 2))) cpuid_populate_local_leaf_ex(2);
+    if (!(_cpuid.leaf_ex_pop & (1 << 3))) cpuid_populate_local_leaf_ex(3);
+    if (!(_cpuid.leaf_ex_pop & (1 << 4))) cpuid_populate_local_leaf_ex(4);
     
     /*
-     * We take advantage the way cpuid_local is structured:
+     * We take advantage the way _cpuid is structured:
      * (at least x86 SYSV ABI dictates it)
      * the leaves and registers are adjacent in order so 
      * simple string copy (memcopy) 
      */
-    src = (char*)cpuid_local.leaf_ex[2].r;
+    src = (char*)_cpuid.leaf_ex[2].r;
     while (*src == ' ') src++;
     
     while ((*buf++ = *src++) != 0);
@@ -361,6 +363,210 @@ int get_cache_info(int i, int m)
     }
 }
 
+/*
+ * returns -1 if cpu model not found
+ */
+static 
+uint32_t cpuid_cpu_model(uint32_t* out_fam)
+{
+    static const uint32_t LEAF = 0x1;
+    static const int A = 0;
+
+    uint32_t family, model;
+    
+    if (!is_leaf_supported_idx(LEAF)) return (uint32_t)(-1);
+
+    if (!(_cpuid.leaf_pop & (1 << LEAF))) {
+	cpuid_populate_local_leaf(LEAF);
+    }
+    
+    union {
+	struct verinfo {
+	    uint32_t stepping :4;
+	    uint32_t model    :4;
+	    uint32_t family   :4;
+	    uint32_t type     :2;
+	    uint32_t res1     :2;
+	    uint32_t ex_model :4;
+	    uint32_t ex_family:8;
+	    uint32_t res2     :4;
+	} f;
+	uint32_t val;
+    } eax;
+    eax.val = _cpuid.leaf[LEAF].r[A];
+    /*
+     * family/model id extraction rule as of IDM Sep 2016 
+     */
+    family = (eax.f.family != 0xf) ? eax.f.family : eax.f.family + eax.f.ex_family;
+    if (eax.f.family == 0x6 || eax.f.family == 0xf) {
+	model = (eax.f.ex_model << 4) + eax.f.model;
+    } else model = eax.f.model;
+
+    if (out_fam) *out_fam = family;
+    return model;
+}
+
+static inline
+uint32_t calculate_cpuid_freq(uint32_t a, uint32_t b, uint32_t c) {
+    uint64_t val = (uint64_t)c * b / a / 1000;  /* report in KHz */
+    return (uint32_t)val;
+}
+
+/*
+ * returns cpuid-reported nominal time stamp counter frequency in KHz
+ * returns 0 if unavailable
+ */
+static 
+uint32_t get_tsc_freq_from_cpuid(void)
+{
+    static const uint32_t LEAF = 0x15;
+    static const int A = 0, B = 1, C = 2;
+
+    if (!is_leaf_supported_idx(LEAF)) return 0;
+
+    if (!(_cpuid.leaf_pop & (1 << LEAF))) {
+	cpuid_populate_local_leaf(LEAF);
+    }
+    
+    /*
+     * according to Section 18.18.3 of Sep 2016 Intel SDM, 
+     * tsc freq = "core clock freq" * "ratio of TSC freq and core clock freq" 
+     *          = ECX * (EBX / EAX) 
+     * if (EBX/EAX) is present, but ECX is zero, then
+     *    if 6th/7th gen non-xeon Core, use 24 MHz for ECX
+     *    if Goldmont (CPUID 06_5CH), use 19.2 MHz for ECX
+     */
+
+    /*
+     * we have to assume 6th gen core to be Skylake and 7th Gen to be Kabylake.
+     * As of Dec 2016, I only know of 06_5E (Skylake) and 06_9E (Kabylake)
+     */
+
+    if (_cpuid.leaf[LEAF].r[A] == 0 || _cpuid.leaf[LEAF].r[B] == 0) return 0;
+    if (_cpuid.leaf[LEAF].r[C] != 0) {
+	return calculate_cpuid_freq(_cpuid.leaf[LEAF].r[A],
+		_cpuid.leaf[LEAF].r[B],
+		_cpuid.leaf[LEAF].r[C]);
+    } else {
+	uint32_t model,family;
+	model = cpuid_cpu_model(&family);
+	if (~model == 0) return 0;
+	if (family == 0x6) {
+	    if (model == 0x5E || model == 0x9E) {
+		return calculate_cpuid_freq(_cpuid.leaf[LEAF].r[A],
+			_cpuid.leaf[LEAF].r[B],
+			24000*1000);
+	    }
+	    if (model == 0x5C) {
+		return calculate_cpuid_freq(_cpuid.leaf[LEAF].r[A],
+			_cpuid.leaf[LEAF].r[B],
+			19200*1000);
+	    }
+	}
+    }
+    return 0;
+}
+
+/*
+ * returns rdtsc frequency in KHz using MSR_PLATFORM_INFO[15:8] value
+ * returns 0 if unavailable
+ */
+#define MSR_PLATFORM_INFO (0xCE)
+#ifdef _WIN32
+static 
+uint32_t get_tsc_freq_from_msr(void)
+{
+    /* XXX */
+    return 0;
+}
+#else
+/*
+ * process must have read privilege on /dev/cpu/0/msr.
+ */
+static 
+uint32_t get_tsc_freq_from_msr(void)
+{
+    uint64_t msr_val;
+    int fd;
+    ssize_t ret;
+    uint32_t family, model;
+
+    fd = open("/dev/cpu/0/msr", O_RDONLY);
+    if (fd < 0) return 0;
+    
+    ret = pread(fd, (void*)&msr_val, sizeof(uint64_t), MSR_PLATFORM_INFO);
+    if (ret != sizeof(uint64_t)) return 0;
+
+    msr_val = (msr_val & 0xffff) >> 8;
+
+    model = cpuid_cpu_model(&family);
+    if (~model == 0) return 0;
+    /*
+     * according to Intel SDM, use 100MHz for SNB, IVB, HSW, Broadwell,
+     * use 133MHz for Nehalem, and other crazy rule for Atoms and Xeons which
+     * we don't give a damn in here.. 
+     */
+    if (family != 0x6) return 0;
+    if (model == 0x2A || // SNB
+	    model == 0x3A || //IVB
+	    model == 0x3C || // HSW
+	    model == 0x45 || // HSW (Y/U)
+	    model == 0x46 || // HSW (crystalwell)
+	    model == 0x3D ) // Broadwell
+    {
+	return (uint32_t)(msr_val*(100*1000*1000/1000));
+    }
+    if (model == 0x1A || // Nehalem EP
+	    0x1E || // Nehalem
+	    0x2E ) // Nehalem EX
+    {
+	return (uint32_t)(msr_val*(133*1000*1000/1000));
+    }
+    return 0;
+}
+#endif
+
+/*
+ * obtain frequency rating from brand string prescribed by CPUID SDM
+ */
+static
+uint32_t get_tsc_freq_from_brandstring(void)
+{
+    char brand[52];
+    int len;
+    char* cur;
+    uint32_t mult;
+    float num;
+
+    len = __cpuid_obtain_brand_string(brand);
+    if (len == 0) return 0;
+
+    // scan backwards
+    cur = &brand[len];
+    while (cur >= brand) {
+	if (*cur-- != 'z') continue;
+	if (*cur-- != 'H') continue;
+	if (*cur == 'G') {
+	    mult = 1000*1000;
+	    goto extract_number;
+	} else if (*cur == 'M') {
+	    mult = 1000;
+	    goto extract_number;
+	}
+    }
+    return 0;
+
+extract_number:
+    *cur-- = ' ';	// place white space for sscanf
+    while (cur >= brand) {
+	if (*cur-- == ' ') {
+	    sscanf(cur+1, "%f", &num);
+	    return (uint32_t)(num * mult);
+	}
+    }
+    return 0;
+}
+
 /* 
  * returns frequency in KHz
  * methodology: time usleep duration with rdtsc.
@@ -413,7 +619,7 @@ uint32_t measure_rdtsc_frequency(void)
    end = perfCount.QuadPart;
    elapsed = (double)(end - start) / frequency.QuadPart;
   */
-uint32_t get_cycle_freq(void)
+uint32_t get_cycle_freq_fallback(void)
 {
     LARGE_INTEGER i;
     uint32_t rdtsc_khz;
@@ -449,7 +655,7 @@ uint32_t get_cycle_freq(void)
     }
 }
 #else
-uint32_t get_cycle_freq(void)
+uint32_t get_cycle_freq_fallback(void)
 {
     /* methodology 1: grep for 'cpu MHz' line in /proc/cpuinfo */
     FILE* fp;
@@ -487,6 +693,53 @@ uint32_t get_cycle_freq(void)
 }
 #endif
 
+/*
+ * test rdtsc with os timer and see if it falls within torerance
+ * returns 1 upon success, 0 upon failure
+ */
+static
+int validate_freq(uint32_t freq_khz) 
+{
+    uint32_t rdtsc_freq_measured;
+
+    rdtsc_freq_measured = measure_rdtsc_frequency();
+
+    if (!rdtsc_freq_measured) return 0;
+    
+    // tolerance: 100Mhz
+    if (abs(freq_khz - rdtsc_freq_measured) / 1000 < 100 ) {
+	return 1;
+    } else {
+	printf("rdtsc frequency validation failed. Trying different method\n");
+	return 0;
+    }
+}
+
+/*
+ * returns timestamp counter (rdtsc) frequency in KHz
+ */
+uint32_t get_cycle_freq(void)
+{
+    uint32_t freq_khz;
+    /* 
+     * SDM recommends using CPUID tsc freq method over MSR_PLATFORM_INFO
+     */
+    freq_khz = get_tsc_freq_from_cpuid();
+    if (freq_khz) {
+	if (validate_freq(freq_khz)) return freq_khz;
+    }
+    freq_khz = get_tsc_freq_from_msr();
+    if (freq_khz) {
+	if (validate_freq(freq_khz)) return freq_khz;
+    }
+    freq_khz = get_tsc_freq_from_brandstring();
+    if (freq_khz) {
+	if (validate_freq(freq_khz)) return freq_khz;
+    }
+
+    return get_cycle_freq_fallback();
+}
+
 static
 _code
 uint64_t _ops_rdtsc(void)
@@ -499,7 +752,8 @@ uint64_t _ops_rdtsc(void)
  */
 int _ops_rdtsc_init_base_freq(struct sys_timestamp* sts)
 {
-    uint32_t freq_khz = measure_rdtsc_frequency();
+    //uint32_t freq_khz = measure_rdtsc_frequency();
+    uint32_t freq_khz = get_cycle_freq();
     if (!freq_khz) return -1;
     sts->base_freq_khz = freq_khz;
     return 0;
@@ -525,7 +779,8 @@ uint64_t _ops_rdtscp(void)
  */
 int _ops_rdtscp_init_base_freq(struct sys_timestamp* sts)
 {
-    uint32_t freq_khz = measure_rdtsc_frequency();
+    //uint32_t freq_khz = measure_rdtsc_frequency();
+    uint32_t freq_khz = get_cycle_freq();
     if (!freq_khz) return -1;
     sts->base_freq_khz = freq_khz;
     return 0;

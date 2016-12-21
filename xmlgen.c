@@ -385,7 +385,7 @@ print_xml_report(char* buf, const parameters* p, int is_interrupted)
     //machine_info
     xmlNodePtr machineinfonode = NULL;
     char modelstr[48];
-    if (__cpuid_obtain_model_string(modelstr)) {
+    if (__cpuid_obtain_brand_string(modelstr)) {
 	machineinfonode = xmlNewChild(reportnode, NULL, BAD_CAST "machine_info", NULL);
 	xmlNewChild(machineinfonode, NULL, BAD_CAST "modelname", BAD_CAST modelstr);
     } else {

@@ -84,6 +84,7 @@ typedef struct parameters {
     struct sys_timestamp* tsops;// timestamp ops (rdtsc_ops or perfc_ops)
     int jobs;		// number of worker threads
     int init_garbage;
+    int threshold;
 #ifdef XALLOC
     int xalloc_mib;	// positive xalloc_mib indicates we use xalloc instead of mmap
     char* xalloc_path;	// xalloc backend file pathname

@@ -57,6 +57,7 @@
 #include "rdtsc.h"
 #include "cpuid.h"
 #include "pattern.h"
+#include "pmbench.h"
 
 /*
  * for leaf with ecx subleaf, this structure only caches ECX=0 leaf. 
@@ -1306,5 +1307,38 @@ char* sys_print_uuid(void)
 char* sys_get_uuid(void)
 {
     return uuid_str;
+}
+
+static int trace_maker_fd;
+void trace_marker_init()
+{
+    trace_maker_fd = open("/sys/kernel/debug/tracing/trace_marker", O_WRONLY);
+    if (-1 == trace_maker_fd) {
+	perror("ftrace_init open trace_marker failed");
+    }
+}
+
+_code
+uint32_t mark_long_latency(uint32_t nsec)
+{
+    char buf[64];
+    if (params.threshold == 0) return nsec;
+
+    if (trace_maker_fd >= 0 && nsec >= params.threshold) {
+	sprintf(buf, "latency > %" PRIu32 "ns: %" PRIu32, params.threshold, nsec);
+	if (-1 == write(trace_maker_fd, buf, strlen(buf))) {
+	    perror("mark_long_latency failed");
+	}
+    }
+    return nsec;
+}
+
+void trace_marker_exit()
+{
+    if (trace_maker_fd >= 0) {
+	if (-1 == close(trace_maker_fd)) {
+	    perror("ftrace_finish close trace_maker_fd failed");
+	}
+    }
 }
 #endif

@@ -150,8 +150,9 @@ uint32_t measure_write(uint32_t *ptr)
 _code 
 uint32_t access_histogram(uint32_t *ptr, int is_write)
 {
-    if (is_write) return measure_write(ptr);
-    return measure_read(ptr);
+    uint32_t latency;
+    latency = is_write ? measure_write(ptr) : measure_read(ptr);
+    return mark_long_latency(latency);
 }
 
 

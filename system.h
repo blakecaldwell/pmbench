@@ -295,6 +295,10 @@ extern int get_cache_info(int i, int m);
 extern char* sys_get_hostname(void);
 extern char* sys_get_uuid(void);
 
+extern void trace_marker_init();
+extern uint32_t mark_long_latency(uint32_t nsec);
+extern void trace_marker_exit();
+
 //XXX ugly.. 
 extern int gl_tlb_info_buf_len;
 extern int gl_det_cache_info_len;

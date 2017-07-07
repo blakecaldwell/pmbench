@@ -83,6 +83,7 @@ static struct argp_option options[] = {
     { "ratio", 'r', "RATIO", 0, "Percentage read/write ratio (0 = write only, 100 = read only; default 50)" }, //TODO: count # of reads/writes
     { "offset", 'o', "OFFSET", 0, "Specify static page access offset (default random)" },
     { "initialize", 'i', 0, OPTION_ARG_OPTIONAL, "Initialize memory map with garbage data" },
+    { "threshold", 'h', "THRESHOLD", 0, "Set the threshold time to trigger the ftrace log" },
 #ifdef PMB_XML
     { "file", 'f', "FILE", 0, "Filename for XML output" },
 #endif
@@ -118,6 +119,7 @@ void set_default_params(parameters* p)
     p->tsops = &rdtscp_ops;
     p->jobs = 1;
     p->init_garbage = 0;
+    p->threshold = 0;
 #ifdef XALLOC
     p->xalloc_mib = 0;
     p->xalloc_path = "/dev/ram0";
@@ -152,6 +154,7 @@ void print_params(const parameters* p)
 #endif
     printf("  offset       = "); if (p->offset < 0) printf("random\n"); else printf("%d\n", p->offset);
     printf("  ratio        = %d%%\n", p->ratio);
+    printf("  threshold    = %d\n", p->threshold);
     if (p->pattern && p->pattern->name) {
 	printf("  pattern      = %s\n", p->pattern->name);
     }
@@ -249,6 +252,9 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     	}
     	param->get_offset = get_offset_function(param->offset);
     	break;
+    case 'h':
+	param->threshold = (arg ? atoi(arg) : 0);
+	break;
 #ifdef PMB_XML
     case 'f':
     	if (arg) {
@@ -1106,6 +1112,7 @@ int main(int argc, char** argv)
     sys_stat_mem_init(&mem_ctx);
     control.interrupted = 0;
     install_ctrlc_handler();
+    trace_marker_init();
 
 #ifdef PMB_THREAD
     perform_benchmark_mt(buf, stats);
@@ -1190,6 +1197,7 @@ int main(int argc, char** argv)
 #endif
 
     remove_ctrlc_handler();
+    trace_marker_exit();
     return 0;
 
 report_no_unmap:

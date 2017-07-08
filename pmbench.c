@@ -690,6 +690,7 @@ void* main_bm_thread(void* arg)
 	    is_write = (roll_dice(&rand_ctx_action) % 1024) < rat_scaled ? 0 : 1;
 
 	    access->exercise(a_addr, is_write);
+	    // don't need to record, don't need to mark long lats
 
 //	    if (p->delay > 10) sys_delay(p->delay); // no delay in warmup..
 	}
@@ -725,6 +726,9 @@ void* main_bm_thread(void* arg)
 
 	    latency_ns = access->exercise(a_addr, is_write);
 	    access->record(stats, latency_ns, is_write);
+#ifndef _WIN32
+	    if (params.threshold > 0) mark_long_latency(latency_ns);
+#endif
 
 	    if (p->delay > 10) sys_delay(p->delay);
 	}
@@ -1112,7 +1116,9 @@ int main(int argc, char** argv)
     sys_stat_mem_init(&mem_ctx);
     control.interrupted = 0;
     install_ctrlc_handler();
+#ifndef _WIN32
     trace_marker_init();
+#endif
 
 #ifdef PMB_THREAD
     perform_benchmark_mt(buf, stats);
@@ -1196,8 +1202,11 @@ int main(int argc, char** argv)
     }
 #endif
 
-    remove_ctrlc_handler();
+#ifndef _WIN32
     trace_marker_exit();
+#endif
+    remove_ctrlc_handler();
+
     return 0;
 
 report_no_unmap:

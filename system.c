@@ -1309,36 +1309,42 @@ char* sys_get_uuid(void)
     return uuid_str;
 }
 
-static int trace_maker_fd;
+#ifndef _WIN32
+static int trace_marker_fd = -1;
 void trace_marker_init()
 {
-    trace_maker_fd = open("/sys/kernel/debug/tracing/trace_marker", O_WRONLY);
-    if (-1 == trace_maker_fd) {
+    if (params.threshold == 0) return;
+
+    trace_marker_fd = open("/sys/kernel/debug/tracing/trace_marker", O_WRONLY);
+    if (trace_marker_fd == -1) {
 	perror("ftrace_init open trace_marker failed");
     }
 }
 
 _code
-uint32_t mark_long_latency(uint32_t nsec)
+void mark_long_latency(uint32_t nsec)
 {
     char buf[64];
-    if (params.threshold == 0) return nsec;
+    int len;
 
-    if (trace_maker_fd >= 0 && nsec >= params.threshold) {
-	sprintf(buf, "latency > %" PRIu32 "ns: %" PRIu32, params.threshold, nsec);
-	if (-1 == write(trace_maker_fd, buf, strlen(buf))) {
+    if (trace_marker_fd == -1) return;
+    if (nsec >= params.threshold) {
+	len = sprintf(buf, "latency > %" PRIu32 "ns: %" PRIu32, 
+		params.threshold, nsec);
+	if (write(trace_marker_fd, buf, len) == -1) {
 	    perror("mark_long_latency failed");
 	}
     }
-    return nsec;
 }
 
 void trace_marker_exit()
 {
-    if (trace_maker_fd >= 0) {
-	if (-1 == close(trace_maker_fd)) {
-	    perror("ftrace_finish close trace_maker_fd failed");
+    if (trace_marker_fd >= 0) {
+	if (close(trace_marker_fd) == -1) {
+	    perror("ftrace_finish close trace_marker_fd failed");
 	}
     }
 }
+#endif	//_WIN32
+
 #endif

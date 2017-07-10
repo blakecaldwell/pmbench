@@ -1736,7 +1736,9 @@ __argp_short_program_name(const struct argp_state *state)
      but currently the value is passed on directly to fputs_unlocked,
      so that requires more changes. */
 # if __GNUC__
+#   ifndef _WIN32
 #  warning No reasonable value to return
+#   endif /* _WIN32 */
   return "";
 # endif /* __GNUC__ */
 #endif /* !HAVE_DECL_PROGRAM_INVOCATION_NAME */

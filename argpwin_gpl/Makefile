@@ -20,7 +20,8 @@ endif
 WCC := $(MINGW_PREFIX)-gcc
 
 
-CFLAGS := -g -O2 -Wall -D_alloca=__builtin_alloca -DHAVE_STRNDUP -D_WIN32_WINNT=0x0501
+#CFLAGS := -g -O2 -Wall -D_alloca=__builtin_alloca -DHAVE_STRNDUP -D_WIN32_WINNT=0x0501
+CFLAGS := -g -O2 -Wall -Wno-pointer-sign -D_alloca=__builtin_alloca -D_WIN32_WINNT=0x0501 
 
 all: argp.dll
 

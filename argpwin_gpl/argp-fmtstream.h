@@ -229,6 +229,7 @@ extern int __argp_fmtstream_ensure (argp_fmtstream_t __fs, size_t __amount);
 #define ARGP_FS_EI extern inline
 #endif
 
+#if 0 // jisoo
 ARGP_FS_EI size_t
 __argp_fmtstream_write (argp_fmtstream_t __fs,
 			__const char *__str, size_t __len)
@@ -321,6 +322,8 @@ __argp_fmtstream_point (argp_fmtstream_t __fs)
 #undef __argp_fmtstream_update
 #undef __argp_fmtstream_ensure
 #endif
+
+#endif //jisoo
 
 #endif /* __OPTIMIZE__ */
 

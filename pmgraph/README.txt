@@ -2,6 +2,8 @@ These are C# files for XML parsing/graphing tool for pmbench.
 
 Instructions for command-line build:
 
+-Windows host build instruction
+
 Prerequisite: On Windows, you would need c# compiler (csc.exe) which can be obtained from Visual Studio or Microsoft .NET Framework SDK.
 
 Execute the following command in the source directory using developer command prompt:
@@ -10,8 +12,14 @@ Execute the following command in the source directory using developer command pr
 
 (You may need to modify the path in -reference according to what you have in your system)
 
+- Linux host build instruction
+Prerequisite: Monodevelop package (mono-devel).
+
+$ mcs -reference:System.Drawing.dll,System.Windows.Forms.dll,System.Windows.Forms.DataVisualization.dll PmGraph.cs Program.cs -out:pmgraph.exe
+
+$ mono ./pmgraph.exe
+
 TODO:
-- Linux port - using monodevelop and GTK#
 - Get rid of async (requires .NET 4.5) for better Linux compatibility and make code conform to older c# and .NET 4.0
 - Replace Forms.DataVisualization with NPlot (see netcontrols.org/nplot/wiki/ )
 - Get rid of warnings

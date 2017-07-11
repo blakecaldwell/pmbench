@@ -527,7 +527,7 @@ namespace PmGraphSpace
                 addMemItemField(item_avg, item_, i, "pswpout", trials);
                 addMemItemField(item_avg, item_, i, "pgmajfault", trials);
             }
-            catch (NullReferenceException x) { MessageBox.Show("(addMemItemsLinux) Null reference "); }
+            catch (NullReferenceException x) { MessageBox.Show("(addMemItemsLinux) Null reference " + x.ToString()); }
         }
         private static void addMemItemsWindows(XmlNode item_avg, XmlNode item_, int i, int trials)
         {
@@ -1144,7 +1144,7 @@ namespace PmGraphSpace
                 }
                 catch (NullReferenceException x)
                 {
-                    MessageBox.Show("PivotChart.setFull(" + b.ToString() + ")null reference exception");
+                    MessageBox.Show("PivotChart.setFull(" + b.ToString() + ")null reference exception"+x.ToString());
                 }
                 return showFull;
             }
@@ -1264,7 +1264,8 @@ namespace PmGraphSpace
                                     toggleSelection(partnerSeries[bs.getSeriesName()]);
                                     refreshSelectionColors(); 
                                 }
-                                catch (KeyNotFoundException x)
+                                //catch (KeyNotFoundException x)
+                                catch (KeyNotFoundException )
                                 {
                                     MessageBox.Show("BenchPivot.PivotChart.toggleLegendItemSelected error: key " + item.SeriesName + " not found.");
                                 }
@@ -1358,7 +1359,8 @@ namespace PmGraphSpace
                     BetterSeries bs = allSeries[s.Name];
                     bs.setContainedSeries(s, type);
                 }
-                catch (KeyNotFoundException x)
+                //catch (KeyNotFoundException x)
+                catch (KeyNotFoundException )
                 {
                     BetterSeries bs = new BetterSeries();
                     bs.setContainedSeries(s, type);
@@ -2797,7 +2799,7 @@ namespace PmGraphSpace
             }
             catch (OutOfMemoryException x)
             {
-                MessageBox.Show("Out of memory. You should probably just quit.");
+                MessageBox.Show("Out of memory. " + x.ToString() + "You should probably just quit.");
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
                 GC.RegisterForFullGCNotification(10, 10);
@@ -2857,7 +2859,7 @@ namespace PmGraphSpace
                 MessageBox.Show("(safeParseSingleNodeDouble(XmlNode, " + xpath + ") Null reference exception:\n" + x.ToString());
                 return 0;
             }
-            catch (OutOfMemoryException x) { return safeParseSingleNodeDouble(where, xpath); }
+            catch (OutOfMemoryException) { return safeParseSingleNodeDouble(where, xpath); }
         }
 
         private void loadActionHandler(int i) { controlPanel.loadAutomaticButton.Text = i.ToString(); }
@@ -2927,7 +2929,7 @@ namespace PmGraphSpace
                         string path = folderPath + "\\" + "results_" + kernelFilenameStrings[i] + "_" + deviceFilenameStrings[j] + "_" + physMemValues[k] + "_final.xml";
                         XmlDocument doc = new XmlDocument();
                         try { doc.Load(path); }
-                        catch (FileNotFoundException x)
+                        catch (FileNotFoundException)
                         {
                             doc = null;
                             continue;
@@ -2947,8 +2949,9 @@ namespace PmGraphSpace
                         catch (ArgumentNullException x) { MessageBox.Show("(loadXmlLoop) Null argument exception:\n" + x.ToString()); return added; }
                         catch (ArgumentException x)
                         {
-                            //MessageBox.Show("Exception adding key " + i + "_" + j + "_" + k + " to dictionary:\n" + x.ToString());
-                            //return added;
+	    // Jisoo: uncommented the followin two lines
+                            MessageBox.Show("Exception adding key " + i + "_" + j + "_" + k + " to dictionary:\n" + x.ToString());
+                            return added;
                         }
                     }
                 }
@@ -3272,7 +3275,7 @@ namespace PmGraphSpace
                 flowPanel.Controls.Add(theChart);
                 if (controlPanel.manualCheck.Enabled == false) controlPanel.exportButton.Enabled = true;
             }
-            catch (NullReferenceException x) { return; }
+            catch (NullReferenceException x) { MessageBox.Show("null reference:"+x.ToString()); return; }
         }
         private int getChartWidth() { return flowPanel.Width - controlPanel.Width - controlPanel.Margin.Left - 17; }
         private int getChartHeight() { return flowPanel.Height - 44; }

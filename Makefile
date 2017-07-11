@@ -22,6 +22,7 @@
 # gcc supports multilib which means -m32/-m64 option pretty much
 # takes care of 32/64bit code generation. All you need is to place
 # needed 32/64 bit libraries in place as follows:
+# - libxml2-devel.i686
 # - libuuid.i686
 # - libuuid-devel.i686
 # - libgcc.i686
@@ -41,6 +42,11 @@ MINGW_PREFIX :=i686-w64-mingw32
 else
 MINGW_PREFIX :=x86_64-w64-mingw32
 endif
+
+# Use pthreadGC2 for older mingw32
+WINPTHREAD_NAME=libwinpthread-1.dll
+#WINPTHREAD_NAME=pthreadGC2.dll
+
 WCC := $(MINGW_PREFIX)-gcc
 
 CFLAGS := -g -O2 -Wall
@@ -133,16 +139,19 @@ dist_bin32: pmbench pmbench.exe
 	install -D ./pmbench $(DISTDIR)/bin/linux/i686/pmbench
 	install -D ./pmbench.exe $(DISTDIR)/bin/windows/win32/pmbench.exe
 	install -m664 -D $(LIBPATH_WINARGP)/argp.dll $(DISTDIR)/bin/windows/win32/dll/argp.dll
-	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/pthreadGC2.dll $(DISTDIR)/bin/windows/win32/dll/pthreadGC2.dll
+	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/$(WINPTHREAD_NAME) $(DISTDIR)/bin/windows/win32/dll/$(WINPTHREAD_NAME)
 	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/libgcc_s_sjlj-1.dll $(DISTDIR)/bin/windows/win32/dll/libgcc_s_sjlj-1.dll
+	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/libxml2-2.dll $(DISTDIR)/bin/windows/win32/dll/libxml2-2.dll
 	
 dist_bin64: pmbench pmbench.exe
 	install -D ./pmbench $(DISTDIR)/bin/linux/x86_64/pmbench
 	install -D ./pmbench.exe $(DISTDIR)/bin/windows/win64/pmbench.exe
 	install -m664 -D $(LIBPATH_WINARGP)/argp.dll $(DISTDIR)/bin/windows/win64/dll/argp.dll
-	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/pthreadGC2.dll $(DISTDIR)/bin/windows/win64/dll/pthreadGC2.dll
+	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/$(WINPTHREAD_NAME) $(DISTDIR)/bin/windows/win64/dll/$(WINPTHREAD_NAME)
+	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/libxml2-2.dll $(DISTDIR)/bin/windows/win64/dll/libxml2-2.dll
 
 endif
+
 dist_doc:
 	install -m664 -D ./doc/pmbench.1 $(DISTDIR)/man/pmbench.1
 	install -m664 -t $(DISTDIR) ./doc/README ./doc/license-*.txt

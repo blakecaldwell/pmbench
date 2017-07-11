@@ -142,6 +142,7 @@ dist_bin32: pmbench pmbench.exe
 	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/$(WINPTHREAD_NAME) $(DISTDIR)/bin/windows/win32/dll/$(WINPTHREAD_NAME)
 	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/libgcc_s_sjlj-1.dll $(DISTDIR)/bin/windows/win32/dll/libgcc_s_sjlj-1.dll
 	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/libxml2-2.dll $(DISTDIR)/bin/windows/win32/dll/libxml2-2.dll
+	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/iconv.dll $(DISTDIR)/bin/windows/win32/dll/iconv.dll
 	
 dist_bin64: pmbench pmbench.exe
 	install -D ./pmbench $(DISTDIR)/bin/linux/x86_64/pmbench
@@ -149,6 +150,7 @@ dist_bin64: pmbench pmbench.exe
 	install -m664 -D $(LIBPATH_WINARGP)/argp.dll $(DISTDIR)/bin/windows/win64/dll/argp.dll
 	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/$(WINPTHREAD_NAME) $(DISTDIR)/bin/windows/win64/dll/$(WINPTHREAD_NAME)
 	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/libxml2-2.dll $(DISTDIR)/bin/windows/win64/dll/libxml2-2.dll
+	install -m664 -D /usr/$(MINGW_PREFIX)/sys-root/mingw/bin/iconv.dll $(DISTDIR)/bin/windows/win64/dll/iconv.dll
 
 endif
 

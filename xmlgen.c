@@ -22,7 +22,7 @@ static xmlChar tempbuf[57];
 
 xmlChar* floatToXmlChar(double f)
 {
-    if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%0.4f\0", f) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, "%0.4f", f) == -1) {
 	printf("floatToXmlChar(%f): Error\n", f);
 	return BAD_CAST "Error";
     }
@@ -31,7 +31,7 @@ xmlChar* floatToXmlChar(double f)
 
 xmlChar* signedIntToXmlChar(int64_t i)
 {
-    if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%"PRId64"\0", i) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, "%"PRId64, i) == -1) {
 	printf("signedIntToXmlChar(%"PRId64"): Error\n", i);
 	return BAD_CAST "Error";
     }
@@ -40,7 +40,7 @@ xmlChar* signedIntToXmlChar(int64_t i)
 
 xmlChar* unsignedIntToXmlChar(uint64_t i)
 {
-    if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%"PRIu64"\0", i) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, "%"PRIu64, i) == -1) {
 	printf("unsignedIntToXmlChar(%"PRIu64"): Error\n", i);
 	return BAD_CAST "Error";
     }
@@ -49,7 +49,7 @@ xmlChar* unsignedIntToXmlChar(uint64_t i)
 
 xmlChar* byteToXmlChar(uint8_t b)
 {
-    if (xmlStrPrintf(tempbuf, 57, BAD_CAST "%02x\0", b) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, "%02x", b) == -1) {
 	printf("byteToXmlChar(%u): Error\n", b);
 	return BAD_CAST "Error";
     }

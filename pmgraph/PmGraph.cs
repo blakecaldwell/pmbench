@@ -26,6 +26,8 @@
 
 /* Written by: Julian Seymour  */
 
+//using System.Diagnostics;
+
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -39,7 +41,7 @@ using System.Xml;
 
 namespace PmGraphSpace
 {
-    public partial class BenchRound
+    public class BenchRound
     {
         //private XmlHierarchy hierarchy;
         public XmlNode roundNode; //XML node containing the trial in question, should be of type test_round
@@ -56,7 +58,8 @@ namespace PmGraphSpace
         public bool hasPendingDeletions { get; set; }
         public bool hasReadSeries { get; set; }
         public bool hasWriteSeries { get; set; }
-        private string readSeriesName, writeSeriesName;
+//        private string readSeriesName, writeSeriesName;
+        public string readSeriesName, writeSeriesName;
         public bool wasDeletedDontBother;
 
         public bool setDeletionFlag(BenchPivot.AccessType type)
@@ -137,10 +140,12 @@ namespace PmGraphSpace
         public int cold() { return seriesObject.benchParams.cold; }
         public string paramsKey1() { return seriesObject.benchParams.paramsKey1; }
         public string paramsKey2() { return seriesObject.benchParams.paramsKey2; }
-        private string[] memstrings_w = { "AvailPhys", "dwMemoryLoad", "TotalPageFile", "AvailPageFile", "AvailVirtual" };
         public bool windowsbench() { return seriesObject.windowsbench; }
 
-        /*private bool checkNegativeDeltas() //fix a windows-only problem caused by bad programming
+	/*
+        private string[] memstrings_w = { "AvailPhys", "dwMemoryLoad", "TotalPageFile", "AvailPageFile", "AvailVirtual" };
+
+        private bool checkNegativeDeltas() //fix a windows-only problem caused by bad programming
         {
             XmlNode a, b, delta;
             XmlNodeList meminfos = roundNode.SelectNodes("pmbenchmark/report/sys_mem_info/sys_mem_item");
@@ -163,6 +168,7 @@ namespace PmGraphSpace
 
         public Chart getRoundChart(BenchPivot.DetailLevel detail)
         {
+//Console.WriteLine("roundNode is " + roundNode.ToString());
             if (myPivotChart == null) myPivotChart = new BenchPivot.PivotChart(roundNode);               
             return (myPivotChart.getPivotChart(detail));
         }
@@ -247,7 +253,7 @@ namespace PmGraphSpace
         }
     }
 
-    public partial class BenchSiblings //a series of benchmarks with common parameters
+    public class BenchSiblings //a series of benchmarks with common parameters
     {
         public XmlNode seriesNode, averageNode; //XML nodes for the series root, and the node containing series averages
         public List<BenchRound> Trials; //rounds from this series
@@ -562,7 +568,11 @@ namespace PmGraphSpace
                 jobs = safeParseSingleNodeInt(seriesNode, params_s + "jobs");
                 cold = safeParseSingleNodeInt(seriesNode, params_s + "cold");
             }
-            catch (Exception x) { MessageBox.Show("(BenchSiblings.makeAverageNode) Error: unable to retrieve ratio parameter:\n" + x.ToString()); return null; }
+            catch (Exception x) { 
+		MessageBox.Show("(BenchSiblings.makeAverageNode) Error: unable to retrieve ratio parameter:\n" + x.ToString());
+		return null; 
+	    }
+    cold += 0; // suppress unused var warning
             XmlNode avg = partialCloneBenchmark(trialsPerSeries);
             seriesNode.AppendChild(avg);
 
@@ -622,14 +632,14 @@ namespace PmGraphSpace
 
     }
 
-    public partial class ParamSet
+    public class ParamSet
     {
         public int indexKernel, indexDevice, indexMemory, indexMapsize, indexJobs, indexDelay, indexRatio, indexNice, valueMemory, valueMapsize, valueJobs, valueDelay, valueRatio, valueNice;
         public string operatingSystem, swapDevice;
         public string paramsKey1, paramsKey2;
         public int duration, setsize, quiet, cold, offset;
         public string shape, pattern, access, tsops;
-        private static int[] physMemValues = { 256, 512, 1024, 2048, 4096, 8192, 16384 };
+//        private static int[] physMemValues = { 256, 512, 1024, 2048, 4096, 8192, 16384 };
         private static int[] mapSizeValues = { 512, 1024, 2048, 4096, 8192, 16384, 32768 };
         private static int[] jobsValues = { 1, 8 };
         private static int[] delayValues = { 0, 1000 };
@@ -719,11 +729,11 @@ namespace PmGraphSpace
         }
     }
 
-    public partial class BenchPivot //a benchmark with comparisons to some other stuff
+    public class BenchPivot //a benchmark with comparisons to some other stuff
     {
-        public partial class PivotChart
+        public class PivotChart
         {
-            public partial class BetterSeries
+            public class BetterSeries
             {
                 protected Series shortSeries, fullSeries, currentSeries;
                 protected Point chartPoint;
@@ -876,7 +886,7 @@ namespace PmGraphSpace
                 }
             }
 
-            private partial class HoverSeries : BetterSeries
+            private class HoverSeries : BetterSeries
             {
                 private Series initializeHoverSeries(Series s)
                 {
@@ -928,7 +938,7 @@ namespace PmGraphSpace
             {
                 Dictionary<string, BetterSeries>.ValueCollection.Enumerator checkus = allSeries.Values.GetEnumerator();
                 string s = null;
-                List<string> deleteus = new List<string>();
+//                List<string> deleteus = new List<string>();
                 while (checkus.MoveNext())
                 {
                     s = checkus.Current.deleteFlagYourselfIfSelected();
@@ -1049,6 +1059,7 @@ namespace PmGraphSpace
                     Chart c = new Chart();
                     ChartArea sumCount = new ChartArea();
                     sumCount.Name = "sum_count"; //current chart measures individual hex buckets, not sum_count, but I don't feel like changing it
+// XXX mono datavisualization doesn't support Axis props.. 
                     sumCount.AxisX.ScaleView.Zoomable = true;
                     sumCount.AxisY.ScaleView.Zoomable = true;
                     sumCount.AxisY.Title = "Sample count";
@@ -1077,7 +1088,7 @@ namespace PmGraphSpace
                             break;
                     }
                 }
-        }
+	    }
 
             public PivotChart(BenchPivot bp, int width, int height) //this constructor is used to produced the displayed chart 
             {
@@ -1725,7 +1736,7 @@ namespace PmGraphSpace
                 }
                 try
                 {
-                    int bucket_index = int.Parse(buckets[0].Attributes.Item(0).Value);
+//                    int bucket_index = int.Parse(buckets[0].Attributes.Item(0).Value);
                     double lo, hi, interval_hi = safeParseSingleNodeInt(buckets[0], "bucket_interval/interval_hi");
                     double interval_lo = safeParseSingleNodeInt(buckets[0], "bucket_interval/interval_lo");
                     lo = Math.Pow(2, interval_lo);
@@ -2049,9 +2060,9 @@ namespace PmGraphSpace
         }
     }
 
-    public partial class PmGraph : Form
+    public class PmGraph : Form
     {
-        public partial class ControlPanel : FlowLayoutPanel
+        public class ControlPanel : FlowLayoutPanel
         {
             public Button resultsButton, loadAutomaticButton, exportButton, autoExportButton, verifyButton, cancelButton, averageSelectedButton, deleteSelectedButton, selectAllButton, selectNoneButton, helpButton;
 
@@ -2061,14 +2072,21 @@ namespace PmGraphSpace
             public int currentKernelIndex, currentDeviceIndex, currentMemoryIndex, currentMapsizeIndex, currentJobsIndex, currentDelayIndex, currentRatioIndex;
             private int tempKernelIndex, tempDeviceIndex, tempMemoryIndex, tempMapsizeIndex, tempJobsIndex, tempDelayIndex, tempRatioIndex, tempRadioIndex;
             private bool tempAutoChecked;
-            private static Padding controlPadding = new Padding(0, 6, 0, 0), panelPadding = new Padding(5, 0, 0, 0), actionButtonPadding = new Padding(3, 0, 0, 0);
+            private static Padding controlPadding = new Padding(0, 6, 0, 0);
+//	    private static Padding panelPadding = new Padding(5, 0, 0, 0);
+	    private static Padding actionButtonPadding = new Padding(3, 0, 0, 0);
             public RadioButton radioKernel, radioDevice, radioMemory, radioMapsize, radioJobs, radioDelay, radioRatio, radioNone, radioSelected;
             private static Size radioSize = new Size(13, 13), labelSize = new Size(72, 14);
             private CancellationTokenSource cancelSource;
-            private FlowLayoutPanel loadValidateRow, exportRow;
+
+            private FlowLayoutPanel loadValidateRow = null, exportRow = null;
+
             private PmGraph parser;
             private string importStandaloneDirectory = null;
-            private Button importManualAverageButton, exportManualButton, importManualSingleButton;
+//            private Button importManualAverageButton;
+            private Button exportManualButton;
+            private Button importManualSingleButton;
+
             public CheckBox manualCheck;
             private Label manualLabel;
             //public TextBox nameAveragesField;
@@ -2147,7 +2165,8 @@ namespace PmGraphSpace
                 }
             }
 
-            private bool dropdownsEnabled, autoActionButtonsEnabled;
+            private bool dropdownsEnabled = false;
+	    private bool autoActionButtonsEnabled = false;
 
             private void manualCheck_click(object sender, EventArgs args)
             {
@@ -2574,6 +2593,7 @@ namespace PmGraphSpace
             public void setControlsEnabled(bool t1, bool t2, bool t3)
             {
                 return;
+/*
                 radioKernel.Enabled = t1;
                 radioDevice.Enabled = t1;
                 radioMemory.Enabled = t1;
@@ -2596,6 +2616,7 @@ namespace PmGraphSpace
                 resultsButton.Enabled = t2;
                 autoExportButton.Enabled = t2;
                 autoCheck.Enabled = t3;
+*/
             }
 
             public void setCancelButton(CancellationTokenSource cancel, int row)
@@ -2738,7 +2759,7 @@ namespace PmGraphSpace
         private string[] deviceFilenameStrings = { "chatham", "NANDSSD", "RAMDISK" };
         private int[] physMemValues = { 256, 512, 1024, 2048, 4096, 8192, 16384 };
         private int totalValidated = 0, failedValidation = 0;
-        private string replaceDir;
+//        private string replaceDir;
         private BenchPivot manualPivot = null;
 
         public PmGraph()
@@ -2990,7 +3011,7 @@ namespace PmGraphSpace
         private string validateLoop(IProgress<int> progress, CancellationToken token)
         {
             string dirtybenches = "";
-            Dictionary<string, string> rewrites = new Dictionary<string, string>();
+//            Dictionary<string, string> rewrites = new Dictionary<string, string>();
             BenchSiblings bs = null;
             for (int j = 0; j < controlPanel.dropKernel.Items.Count; j++) //0
             {
@@ -3164,8 +3185,8 @@ namespace PmGraphSpace
 
         private XmlNode getBenchSiblingsNodeFromDocAndKey(XmlDocument doc, string key2)
         {
-            char[] delimiter = { '_' };
-            string[] key_split = key2.Split(delimiter);
+//            char[] delimiter = { '_' };
+//            string[] key_split = key2.Split(delimiter);
             try //select the node with the user-provided parameters
             {
                 return safeSelectSingleNode(doc, controlPanel.getNodeSelectionPathFromKey2(key2));
@@ -3393,7 +3414,7 @@ namespace PmGraphSpace
                     xmlFiles.Add(t, doc);
                     break;
                 }
-                catch (ArgumentException x)
+                catch (ArgumentException)
                 {
                     if (allowrename) t = s + trynum++;
                 }

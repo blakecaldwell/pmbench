@@ -17,9 +17,12 @@ Prerequisite: Monodevelop package (mono-devel).
 
 $ mcs -reference:System.Drawing.dll,System.Windows.Forms.dll,System.Windows.Forms.DataVisualization.dll PmGraph.cs Program.cs -out:pmgraph.exe
 
+Copy pmgraph.exe to windows and execute there.
+
+You can execute on Linux (see below), but mono's DataVisualization library is incomplete so you will get runtime error)
+
 $ mono ./pmgraph.exe
 
 TODO:
 - Get rid of async (requires .NET 4.5) for better Linux compatibility and make code conform to older c# and .NET 4.0
 - Replace Forms.DataVisualization with NPlot (see netcontrols.org/nplot/wiki/ )
-- Get rid of warnings

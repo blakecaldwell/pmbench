@@ -32,19 +32,30 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace pmgraph
+namespace PmGraphNS
 {
-    static class Program
+// shorthand for displaying messagebox text
+public static class MB
+{
+    public static void S(string str) 
     {
-        /// <summary>
-        /// The main entry point for the application.
-        /// </summary>
-        [STAThread]
-        static void Main()
-        {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new PmGraphSpace.PmGraph());
-        }
+	MessageBox.Show(str);
     }
+}
+
+
+
+static class Program
+{
+    /// <summary>
+    /// The main entry point for the application.
+    /// </summary>
+    [STAThread]
+    static void Main()
+    {
+	Application.EnableVisualStyles();
+	Application.SetCompatibleTextRenderingDefault(false);
+	Application.Run(new PmGraphNS.PmGraph());
+    }
+}
 }

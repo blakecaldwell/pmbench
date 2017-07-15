@@ -184,7 +184,7 @@ pmbench.exe: pmbench.obj pattern.obj system.obj access.obj xmlgen.obj
 	$(WCC) -c $(CFLAGS) $(CFLAGS_WIN) -o $@ $< $(LXML)
 
 
-.depend:  pmbench.c pattern.c system.c access.c
+.depend:  pmbench.c pattern.c system.c access.c xmlgen.c
 	@gcc -MM $(CFLAGS) $^ > $@
 
 -include .depend

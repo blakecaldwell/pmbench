@@ -40,7 +40,7 @@ namespace PmGraphNS
 {
 
 public enum AccessType { uninitialized = -1, read = 0, write = 1 }
-public enum DetailLevel { uninitialized = -1, shorttype = 0, fulltype = 1, currenttype = 2 }
+public enum DetailLevel { uninitialized = -1, minitype = 0, fulltype = 1, currenttype = 2 }
 
 public static class SafeXmlParse
 {
@@ -64,8 +64,7 @@ public static class SafeXmlParse
 	    GC.Collect();
 	    GC.RegisterForFullGCNotification(10, 10);
 	    //some kind of notification here
-	    while (true)
-	    {
+	    while (true) {
 		if (GC.WaitForFullGCComplete() == GCNotificationStatus.Succeeded) break;
 		Thread.Sleep(500);
 	    }
@@ -129,16 +128,16 @@ public static class SafeXmlParse
     public static double toDouble(XmlNode where, string xpath)
     {
 	if (selNode(where, xpath) == null) {
-	    MB.S("(toDouble) Null");
+	    MB.S("toDouble: Null");
 	}
 	if (selNode(where, xpath).InnerText == null) {
-	    MB.S("SafeParseSingleNodeDouble Null inner text");
+	    MB.S("toDouble: Null inner text");
 	}
 	try {
 	    return double.Parse(selNode(where, xpath).InnerText);
 	} //throwing null exceptions because node selection is causing it to run out of memory
 	catch (NullReferenceException x) {
-	    MB.S("(toDouble(XmlNode, " + xpath + ") Null reference exception:\n" + x.ToString());
+	    MB.S("toDouble: (XmlNode, " + xpath + ") Null reference exception:\n" + x.ToString());
 	    return 0;
 	}
 	catch (OutOfMemoryException) {
@@ -153,7 +152,9 @@ public class BenchRound
     //private XmlHierarchy hierarchy;
     public XmlNode roundNode; //XML node containing the trial in question, should be of type test_round
     public BenchSiblings seriesObject; //series (with identical params) this round belongs to
-    public PivotChart myPivotChart; //chart with histograms for transcription
+
+    //public PivotChart myPivotChart; //chart with histograms for transcription
+    public MasterDataChart myDataChart; //chart with histograms for transcription
 
     public int trialNum; //which trial number among its series
     //private bool hasSumCounts; //does the node have a hit counts sum node for latencies <= 2^8 ns? Temporary fix no longer needed
@@ -212,7 +213,7 @@ public class BenchRound
     {
 	roundNode = null;
 	seriesObject = null;
-	myPivotChart = null;
+	myDataChart = null;
 	readDeleteFlag = false;
 	writeDeleteFlag = false;
 	killMeFlag = false;
@@ -270,10 +271,23 @@ public class BenchRound
     }
     */
 
-    public Chart getRoundChart(DetailLevel detail)
+    /*
+     */
+    public void populateDataChart()
     {
-	if (myPivotChart == null) myPivotChart = new PivotChart(roundNode);               
-	return myPivotChart.getPivotChart(detail);
+	if (myDataChart == null) {
+Console.WriteLine("populateDataChart: creating new MasterDataChart");
+	    myDataChart = new MasterDataChart(roundNode);
+	}
+    }
+
+    /*
+     * get the Chart object that holds Points data.
+     * (old name: getRoundChart())
+     */
+    public Chart getDataChart(DetailLevel detail)
+    {
+	return myDataChart.getDataChart(detail);
     }
     
     public void registerSeriesName(string s, AccessType t)
@@ -293,7 +307,7 @@ public class BenchRound
 	    }
 	    break;
 	default:
-	    MB.S("BenchRound.registerSeriesName error");
+	    MB.S("registerSeriesName error");
 	    return;
 	}
     }
@@ -319,11 +333,12 @@ public class BenchRound
 
 	if (!hasPendingDeletions) return 0;
 
-	Chart shortChart = myPivotChart.getPivotChart(DetailLevel.shorttype);
-	Chart fullChart = myPivotChart.getPivotChart(DetailLevel.fulltype);
+	Chart miniChart = myDataChart.getDataChart(DetailLevel.minitype);
+	Chart fullChart = myDataChart.getDataChart(DetailLevel.fulltype);
+
 	if (readDeleteFlag) {
 	    if (hasReadSeries) {
-		shortChart.Series.Remove(shortChart.Series.FindByName("read"));
+		miniChart.Series.Remove(miniChart.Series.FindByName("read"));
 		fullChart.Series.Remove(fullChart.Series.FindByName("read"));
 		hasReadSeries = false;
 		deleted += 1;
@@ -331,7 +346,7 @@ public class BenchRound
 	}
 	if (writeDeleteFlag) {
 	    if (hasWriteSeries) {
-		shortChart.Series.Remove(shortChart.Series.FindByName("write"));
+		miniChart.Series.Remove(miniChart.Series.FindByName("write"));
 		fullChart.Series.Remove(fullChart.Series.FindByName("write"));
 		hasWriteSeries = false;
 		deleted += 1;
@@ -364,6 +379,9 @@ public class BenchSiblings
     public int readSpikeIntervalHi = -1, writeSpikeIntervalHi = -1, readSpikeHexBinNum = -1, writeSpikeHexBinNum = -1; //for locating the read and write spikes
     public bool spikesCalculated = false;
 
+    /*
+     * calling getAverageNode populates average node.
+     */
     public BenchRound getAverageRound()
     {
 	if (averageRound == null) {
@@ -472,6 +490,9 @@ public class BenchSiblings
 	averageRound = null;
     }
 
+    /*
+     * this one performs average calculation via getAverageRound() call 
+     */
     public BenchSiblings(XmlNode node, XmlDocument doc, ParamSet ps)
     {
 	seriesNode = node;
@@ -498,8 +519,7 @@ public class BenchSiblings
 	XmlNodeList test_rounds = seriesNode.SelectNodes("test_round");
 	this.trialsPerSeries = test_rounds.Count;
 
-	for (int i = 0; i < test_rounds.Count; i++)
-	{
+	for (int i = 0; i < test_rounds.Count; i++) {
 	    BenchRound br = new BenchRound(this, test_rounds.Item(i), i + 1);
 	    Trials.Add(br);
 	}
@@ -545,7 +565,12 @@ public class BenchSiblings
     }
 
     //works for some elements in result as well
-    private static void addMemItemField(XmlNode item_avg, XmlNode item_, int i, string s, int trials)
+    private static void addMemItemField(
+	    XmlNode item_avg, 
+	    XmlNode item_, 
+	    int i, 
+	    string s, 
+	    int trials)
     {
 	try {
 	    double t = SafeXmlParse.toDouble(item_avg, s);
@@ -561,7 +586,11 @@ public class BenchSiblings
     }
 
     //add thread 2's result data to thread 1's, then divide by 5 if i == 5
-    private static void addThreadResults(XmlNode thread_avg, XmlNode thread_, int i, int trials)
+    private static void addThreadResults(
+	    XmlNode thread_avg, 
+	    XmlNode thread_, 
+	    int i, 
+	    int trials)
     {
 	addMemItemField(thread_avg, thread_, i, "result_netavg/netavg_us", trials);
 	addMemItemField(thread_avg, thread_, i, "result_netavg/netavg_clk", trials);
@@ -574,12 +603,16 @@ public class BenchSiblings
     }
 
     //add the second histogram to the first, then divide if it's round 5
-    public static bool addHistograms(XmlNode histo_avg, XmlNode histo, int round, int trials) 
+    public static bool addHistograms(
+	    XmlNode histo_avg, 
+	    XmlNode histo, 
+	    int round, 
+	    int trials) 
     {
 	XmlNode bucket, bucket_avg;
 	double sum_temp, term_temp;
-	for (int j = 1; j <= 15; j++)
-	{
+
+	for (int j = 1; j <= 15; j++) {
 	    //get node 6's bucket
 	    try {
 		bucket_avg = SafeXmlParse.selNode(histo_avg, "histo_bucket[@index='" + j + "']");
@@ -617,8 +650,7 @@ public class BenchSiblings
 	    }
 	    sum_temp += term_temp;
 
-	    if (round == trials) // this.trialsPerSeries)
-	    {
+	    if (round == trials) { // this.trialsPerSeries)
 		sum_temp /= trials; // PerSeries;
 	    }
 
@@ -631,8 +663,7 @@ public class BenchSiblings
 		return false;
 	    }
 
-	    for (int k = 0; k < 16; k++)
-	    {
+	    for (int k = 0; k < 16; k++) {
 		try {
 		    addMemItemField(bucket_avg, bucket, round, "bucket_hexes/hex[@index='" + k + "']", trials);
 		}
@@ -659,8 +690,7 @@ public class BenchSiblings
 	    return false;
 	}
 
-	for (int j = 0; j < bucket0.Count; j++)
-	{
+	for (int j = 0; j < bucket0.Count; j++) {
 	    try {
 		bucket_avg = bucket0_avg.Item(j); //why can't you access these like an array?
 		bucket = bucket0.Item(j);
@@ -742,7 +772,7 @@ public class BenchSiblings
 	    MB.S("makeAverageNode: unable to retrieve ratio parameter:" + x.ToString());
 	    return null; 
 	}
-cold += 0; // JY suppress unused var warning
+cold += 0; // JY suppress unused variable warning
 	XmlNode avg = partialCloneBenchmark(trialsPerSeries);
 	seriesNode.AppendChild(avg);
 
@@ -935,31 +965,31 @@ public static class CsvWriter
     private static string results_headers = "Thread #,Net avg. (us),Net avg. (clk),Latency (us),Latency (clk),Samples,Overhead (us),Overhead (clk)\n"; //,Total\n";
     private static string params_headers = "OS/kernel,Swap device,Phys. memory,Map size,Jobs,Delay,Read/write ratio,Niceness\n";
 
-    private static void writePivotCsvSignature(int term, BenchChart bc)
+    private static void writePivotCsvSignature(int term, Harness hn)
     {
 	string div1 = ",", div2 = "*";
 
 	switch (term) {
 	case (0):
-	    bc.outfile.Write((bc.pivotIndex == 0 ? div2 : bc.baseParams.operatingSystem) + div1);
+	    hn.outfile.Write((hn.pivotIndex == 0 ? div2 : hn.baseParams.operatingSystem) + div1);
 	    break;
 	case (1):
-	    bc.outfile.Write((bc.pivotIndex == 1 ? div2 : bc.baseParams.swapDevice) + div1);
+	    hn.outfile.Write((hn.pivotIndex == 1 ? div2 : hn.baseParams.swapDevice) + div1);
 	    break;
 	case (2):
-	    bc.outfile.Write((bc.pivotIndex == 2 ? div2 : bc.baseParams.valueMemory.ToString() + "MiB") + div1);
+	    hn.outfile.Write((hn.pivotIndex == 2 ? div2 : hn.baseParams.valueMemory.ToString() + "MiB") + div1);
 	    break;
 	case (3):
-	    bc.outfile.Write((bc.pivotIndex == 3 ? div2 : bc.baseParams.valueMapsize.ToString() + "MiB") + div1);
+	    hn.outfile.Write((hn.pivotIndex == 3 ? div2 : hn.baseParams.valueMapsize.ToString() + "MiB") + div1);
 	    break;
 	case (4):
-	    bc.outfile.Write((bc.pivotIndex == 4 ? div2 : bc.baseParams.valueJobs.ToString()) + div1);
+	    hn.outfile.Write((hn.pivotIndex == 4 ? div2 : hn.baseParams.valueJobs.ToString()) + div1);
 	    break;
 	case (5):
-	    bc.outfile.Write((bc.pivotIndex == 5 ? div2 : bc.baseParams.valueDelay.ToString()) + div1);
+	    hn.outfile.Write((hn.pivotIndex == 5 ? div2 : hn.baseParams.valueDelay.ToString()) + div1);
 	    break;
 	case (6):
-	    bc.outfile.Write((bc.pivotIndex == 6 ? div2 : bc.baseParams.valueRatio.ToString()) + div1);
+	    hn.outfile.Write((hn.pivotIndex == 6 ? div2 : hn.baseParams.valueRatio.ToString()) + div1);
 	    break;
 	/*case (7):
 	    outfile.Write((pivotIndex == 7 ? div2 : baseParams.valueNice.ToString()));
@@ -969,62 +999,62 @@ public static class CsvWriter
 	}
     }
 
-    public static string getPivotDumpHeader(int i, BenchChart bc) //i = crony #
+    public static string getPivotDumpHeader(int i, Harness hn) //i = round #
     {
-	if (bc.pivotIndex == 8) {
+	if (hn.pivotIndex == 8) {
 	    return (i == 5 ? "Average" : "Trial " + (i + 1));
 	}
-	switch (bc.pivotIndex) {
+	switch (hn.pivotIndex) {
 	case (0):   //OS/Kernel
-	    return bc.cronies[i].operatingSystem();
+	    return hn.rounds[i].operatingSystem();
 	case (1):   //Device
-	    return bc.cronies[i].swapDevice();
+	    return hn.rounds[i].swapDevice();
 	case (2):   //Phys. memory
-	    return (bc.cronies[i].valueMemory().ToString() + " memory");
+	    return (hn.rounds[i].valueMemory().ToString() + " memory");
 	case (3):   //Map size
-	    return (bc.cronies[i].valueMapsize().ToString() + " map");
+	    return (hn.rounds[i].valueMapsize().ToString() + " map");
 	case (4):   //Jobs
-	    return bc.cronies[i].jobs().ToString();
+	    return hn.rounds[i].jobs().ToString();
 	case (5):   //Delay
-	    switch (int.Parse(bc.cronies[i].valueDelay().ToString())) {
+	    switch (int.Parse(hn.rounds[i].valueDelay().ToString())) {
 	    case (0):
 		return "None";
 	    default:
-		return (bc.cronies[i].valueDelay().ToString() + " clk");
+		return (hn.rounds[i].valueDelay().ToString() + " clk");
 	    }
 	case (6):   //Ratio
-	    switch (bc.cronies[i].ratio()) {
+	    switch (hn.rounds[i].ratio()) {
 	    case (0):
 		return "Write-only";
 	    case (100):
 		return "Read-only";
 	    default:
-		return (bc.cronies[i].ratio().ToString() + "%");
+		return (hn.rounds[i].ratio().ToString() + "%");
 	    }
 	case (7):   //Nice
-	    return "0"; // cronies[i].valueNice().ToString();
+	    return "0"; // rounds[i].valueNice().ToString();
 	case (9): //stopgap
-	    return bc.cronies[i].customName;
+	    return hn.rounds[i].customName;
 	default:
-	    return "ERROR getPivotDumpHeader(" + i + ") index " + bc.pivotIndex;
+	    return "ERROR getPivotDumpHeader(" + i + ") index " + hn.pivotIndex;
 	}
     }
 
-    public static int writePivotCsvDump(string folder, BenchChart bc, ref StreamWriter outfile)
+    public static int writePivotCsvDump(string folder, Harness hn, ref StreamWriter outfile)
     {
 
 	string path = "";
 	bool good = true;
 
 	string csvfilename = (
-	    (bc.pivotIndex == 0 ? "all" : bc.baseParams.operatingSystem) + "_" +
-	    (bc.pivotIndex == 1 ? "all" : bc.baseParams.swapDevice) + "_" +
-	    (bc.pivotIndex == 2 ? "all" : bc.baseParams.valueMemory.ToString() + "MiB") + "_" +
-	    (bc.pivotIndex == 3 ? "all" : bc.baseParams.valueMapsize.ToString() + "MiB") + "_" +
-	    (bc.pivotIndex == 4 ? "all" : bc.baseParams.valueJobs.ToString()) + "_" +
-	    (bc.pivotIndex == 5 ? "all" : bc.baseParams.valueDelay.ToString()) + "_" +
-	    (bc.pivotIndex == 6 ? "all" : bc.baseParams.valueRatio.ToString()) + "_" +
-	    (bc.pivotIndex == 7 ? "all" : bc.baseParams.valueNice.ToString())
+	    (hn.pivotIndex == 0 ? "all" : hn.baseParams.operatingSystem) + "_" +
+	    (hn.pivotIndex == 1 ? "all" : hn.baseParams.swapDevice) + "_" +
+	    (hn.pivotIndex == 2 ? "all" : hn.baseParams.valueMemory.ToString() + "MiB") + "_" +
+	    (hn.pivotIndex == 3 ? "all" : hn.baseParams.valueMapsize.ToString() + "MiB") + "_" +
+	    (hn.pivotIndex == 4 ? "all" : hn.baseParams.valueJobs.ToString()) + "_" +
+	    (hn.pivotIndex == 5 ? "all" : hn.baseParams.valueDelay.ToString()) + "_" +
+	    (hn.pivotIndex == 6 ? "all" : hn.baseParams.valueRatio.ToString()) + "_" +
+	    (hn.pivotIndex == 7 ? "all" : hn.baseParams.valueNice.ToString())
 	);
 
 	if (folder == null) {
@@ -1052,19 +1082,19 @@ public static class CsvWriter
 		outfile = new StreamWriter(path);
 		outfile.Write(params_headers);
 		for (int i = 0; i < 8; i++) {
-		    writePivotCsvSignature(i, bc);
+		    writePivotCsvSignature(i, hn);
 		}
 		outfile.Write("\n\n");
 		XmlNode report, result;
-		for (int h = 0; h < bc.cronies.Count; h++)
+		for (int h = 0; h < hn.rounds.Count; h++)
 		{
-		    outfile.Write(getPivotDumpHeader(h, bc) + ",");
+		    outfile.Write(getPivotDumpHeader(h, hn) + ",");
 		    outfile.Write(results_headers);
-		    report = SafeXmlParse.selNode(bc.cronies[h].roundNode, "pmbenchmark/report");
-		    for (int j = 1; j <= bc.cronies[h].jobs(); j++)
+		    report = SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report");
+		    for (int j = 1; j <= hn.rounds[h].jobs(); j++)
 		    {
 			result = SafeXmlParse.selNode(report, "result/result_thread[@thread_num='" + j + "']");
-			bc.outfile.Write
+			hn.outfile.Write
 			(
 			    " ," + j + "," +
 			    SafeXmlParse.toDouble(result, "result_netavg/netavg_us") + "," +
@@ -1083,76 +1113,76 @@ public static class CsvWriter
 
 		List<XmlNode> histos;
 		bool first = true;
-		if (bc.pivotIndex == 6 || bc.baseParams.valueRatio > 0)
+		if (hn.pivotIndex == 6 || hn.baseParams.valueRatio > 0)
 		{
-		    bc.outfile.Write("Read latencies,,");
+		    hn.outfile.Write("Read latencies,,");
 		    histos = new List<XmlNode>();
-		    for (int h = 0; h < bc.cronies.Count; h++)
+		    for (int h = 0; h < hn.rounds.Count; h++)
 		    {
-			if (bc.cronies[h].ratio() > 0)
+			if (hn.rounds[h].ratio() > 0)
 			{
-			    if (!first) { bc.outfile.Write(","); }
+			    if (!first) { hn.outfile.Write(","); }
 			    else { first = false; }
-			    bc.outfile.Write(getPivotDumpHeader(h, bc));
-			    histos.Add(SafeXmlParse.selNode(bc.cronies[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='read']"));
+			    hn.outfile.Write(getPivotDumpHeader(h, hn));
+			    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='read']"));
 			}
 		    }
-		    bc.outfile.Write("\n");
+		    hn.outfile.Write("\n");
 		    //MB.S("Writing histograms for " + histos.Count + " histograms");
-		    writeCommaSeparatePivotHistogramList(histos, bc);
+		    writeCommaSeparatePivotHistogramList(histos, hn);
 		    histos.Clear();
 		}
 
-		if (bc.pivotIndex == 6 || bc.baseParams.valueRatio < 100) {
+		if (hn.pivotIndex == 6 || hn.baseParams.valueRatio < 100) {
 		    first = true;
-		    bc.outfile.Write("Write latencies,,");
+		    hn.outfile.Write("Write latencies,,");
 		    histos = new List<XmlNode>();
-		    for (int h = 0; h < bc.cronies.Count; h++)
+		    for (int h = 0; h < hn.rounds.Count; h++)
 		    {
-			if (bc.cronies[h].ratio() < 100)
+			if (hn.rounds[h].ratio() < 100)
 			{
-			    if (!first) bc.outfile.Write(","); 
+			    if (!first) hn.outfile.Write(","); 
 			    else first = false;
-			    bc.outfile.Write(getPivotDumpHeader(h, bc));
-			    histos.Add(SafeXmlParse.selNode(bc.cronies[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='write']"));
+			    hn.outfile.Write(getPivotDumpHeader(h, hn));
+			    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='write']"));
 			}
 		    }
-		    bc.outfile.Write("\n");
-		    writeCommaSeparatePivotHistogramList(histos, bc);
+		    hn.outfile.Write("\n");
+		    writeCommaSeparatePivotHistogramList(histos, hn);
 		    histos.Clear();
 		}
 		histos = null;
 
-		for (int m = 0; m < bc.cronies.Count; m++)
+		for (int m = 0; m < hn.rounds.Count; m++)
 		{
-		    XmlNodeList sys_mem_items = bc.cronies[m].roundNode.SelectNodes("pmbenchmark/report/sys_mem_info/sys_mem_item");
-		    int j = bc.cronies[m].cold();
-		    if (bc.cronies[m].windowsbench())
+		    XmlNodeList sys_mem_items = hn.rounds[m].roundNode.SelectNodes("pmbenchmark/report/sys_mem_info/sys_mem_item");
+		    int j = hn.rounds[m].cold();
+		    if (hn.rounds[m].windowsbench())
 		    {
-			bc.outfile.Write(getPivotDumpHeader(m, bc) + "," + memitems_headers_windows);
+			hn.outfile.Write(getPivotDumpHeader(m, hn) + "," + memitems_headers_windows);
 			for (int k = 0; k < sys_mem_items.Count; k++)
 			{
-			    bc.outfile.Write(meminfos_headers[k + j] + ",");
+			    hn.outfile.Write(meminfos_headers[k + j] + ",");
 			    XmlNode item = sys_mem_items.Item(k);
-			    writeCommaSeparateMemInfoWindows(SafeXmlParse.selNode(item, "mem_item_info"), bc);
+			    writeCommaSeparateMemInfoWindows(SafeXmlParse.selNode(item, "mem_item_info"), hn);
 			    if (!item.Attributes.Item(0).Value.Equals("post-unmap"))
 			    {
-				bc.outfile.Write("Delta,");
-				writeCommaSeparateMemInfoWindows(SafeXmlParse.selNode(item, "mem_item_delta"), bc);
+				hn.outfile.Write("Delta,");
+				writeCommaSeparateMemInfoWindows(SafeXmlParse.selNode(item, "mem_item_delta"), hn);
 			    }
 			    item = null;
 			}
 		    } else {
-			bc.outfile.Write(getPivotDumpHeader(m, bc) + "," + memitems_headers_linux);
+			hn.outfile.Write(getPivotDumpHeader(m, hn) + "," + memitems_headers_linux);
 			for (int k = 0; k < sys_mem_items.Count; k++)
 			{
-			    bc.outfile.Write(meminfos_headers[k + j] + ",");
+			    hn.outfile.Write(meminfos_headers[k + j] + ",");
 			    XmlNode item = sys_mem_items.Item(k);
-			    writeCommaSeparateMemInfoLinux(SafeXmlParse.selNode(item, "mem_item_info"), bc);
+			    writeCommaSeparateMemInfoLinux(SafeXmlParse.selNode(item, "mem_item_info"), hn);
 			    if (!item.Attributes.Item(0).Value.Equals("post-unmap"))
 			    {
-				bc.outfile.Write("Delta,");
-				writeCommaSeparateMemInfoLinux(SafeXmlParse.selNode(item, "mem_item_delta"), bc);
+				hn.outfile.Write("Delta,");
+				writeCommaSeparateMemInfoLinux(SafeXmlParse.selNode(item, "mem_item_delta"), hn);
 			    }
 			    item = null;
 			}
@@ -1173,10 +1203,10 @@ public static class CsvWriter
 	return 1;
     }
 
-    private static void writeCommaSeparateMemInfoLinux(XmlNode info, BenchChart bc)
+    private static void writeCommaSeparateMemInfoLinux(XmlNode info, Harness hn)
     {
 	try {
-	    bc.outfile.Write
+	    hn.outfile.Write
 	    (
 		SafeXmlParse.selNode(info, "free_kib").InnerText + "," +
 		SafeXmlParse.selNode(info, "buffer_kib").InnerText + "," +
@@ -1195,9 +1225,9 @@ public static class CsvWriter
 	}
     }
 
-    private static void writeCommaSeparateMemInfoWindows(XmlNode info, BenchChart bc)
+    private static void writeCommaSeparateMemInfoWindows(XmlNode info, Harness hn)
     {
-	bc.outfile.Write
+	hn.outfile.Write
 	(
 	    SafeXmlParse.selNode(info, "AvailPhys").InnerText + "," +
 	    SafeXmlParse.selNode(info, "dwMemoryLoad").InnerText + "," +
@@ -1207,7 +1237,7 @@ public static class CsvWriter
 	);
     }
 
-    private static void writeCommaSeparateFullBucket(List<XmlNode> nodes, int i, BenchChart bc)
+    private static void writeCommaSeparateFullBucket(List<XmlNode> nodes, int i, Harness hn)
     {
 	//write bucket i of all nodes in order
 	double lo = Math.Pow(2, i + 7);
@@ -1217,20 +1247,20 @@ public static class CsvWriter
 	{
 	    double gap1 = lo + (j * mid);
 	    double gap2 = gap1 + mid;
-	    bc.outfile.Write(gap1 + "," + gap2 + ",");
+	    hn.outfile.Write(gap1 + "," + gap2 + ",");
 	    for (int k = 0; k < nodes.Count; k++)
 	    {
-		bc.outfile.Write(SafeXmlParse.toDouble(nodes[k], "histo_bucket[@index='" + i + "']/bucket_hexes/hex[@index='" + j + "']"));
+		hn.outfile.Write(SafeXmlParse.toDouble(nodes[k], "histo_bucket[@index='" + i + "']/bucket_hexes/hex[@index='" + j + "']"));
 		if (k == nodes.Count - 1) {
-		    bc.outfile.Write("\n");
+		    hn.outfile.Write("\n");
 		} else {
-		    bc.outfile.Write(",");
+		    hn.outfile.Write(",");
 		}
 	    }
 	}
     }
 
-    private static void writeCommaSeparateSumCounts(XmlNode[] buckets, BenchChart bc)
+    private static void writeCommaSeparateSumCounts(XmlNode[] buckets, Harness hn)
     {
 	if (buckets == null) {
 	    MB.S("writeCommaSeparateSumCounts error: null buckets");
@@ -1254,12 +1284,12 @@ public static class CsvWriter
 	    double interval_lo = SafeXmlParse.toInt(buckets[0], "bucket_interval/interval_lo");
 	    lo = Math.Pow(2, interval_lo);
 	    hi = Math.Pow(2, interval_hi);
-	    bc.outfile.Write(lo + "," + hi + ",");
+	    hn.outfile.Write(lo + "," + hi + ",");
 	    for (int j = 0; j < buckets.Length; j++)
 	    {
-		bc.outfile.Write(SafeXmlParse.toDouble(buckets[j], "sum_count"));
-		if (j == buckets.Length - 1) bc.outfile.Write("\n");
-		else bc.outfile.Write(",");
+		hn.outfile.Write(SafeXmlParse.toDouble(buckets[j], "sum_count"));
+		if (j == buckets.Length - 1) hn.outfile.Write("\n");
+		else hn.outfile.Write(",");
 	    }
 	}
 	catch (ArgumentException x) {
@@ -1268,11 +1298,11 @@ public static class CsvWriter
 	}
     }
 
-    public static void writeCommaSeparatePivotHistogramList(List<XmlNode> nodes, BenchChart bc)
+    public static void writeCommaSeparatePivotHistogramList(List<XmlNode> nodes, Harness hn)
     {
 	//MB.S("writeCommaSeparatePivotHistogramList: Received a list of " + nodes.Count + " nodes");
 	XmlNodeList[] bucket0s = new XmlNodeList[nodes.Count];
-	bc.outfile.Write("0,256,");
+	hn.outfile.Write("0,256,");
 	for (int i = 0; i < nodes.Count; i++)
 	{
 	    if (nodes[i] == null) {
@@ -1280,7 +1310,7 @@ public static class CsvWriter
 		return;
 	    }
 
-	    //bucket0s[i] contains all of the bucket 0's for crony i
+	    //bucket0s[i] contains all of the bucket 0's for round i
 	    bucket0s[i] = nodes[i].SelectNodes("histo_bucket[@index='0']");
 
 	    if (SafeXmlParse.toInt(bucket0s[i].Item(0), "bucket_interval/interval_lo") != 0)
@@ -1288,25 +1318,25 @@ public static class CsvWriter
 		MB.S("commaSeparateHistogramList: missing hit_counts_sum on test round " + i + 1);
 	    }
 
-	    bc.outfile.Write(SafeXmlParse.toDouble(bucket0s[i].Item(0), "sum_count"));
+	    hn.outfile.Write(SafeXmlParse.toDouble(bucket0s[i].Item(0), "sum_count"));
 	    if (i == nodes.Count - 1) {
-		bc.outfile.Write("\n");
+		hn.outfile.Write("\n");
 	    } else {
-		bc.outfile.Write(",");
+		hn.outfile.Write(",");
 	    }
 	}
 
 	for (int i = 1; i < 16; i++) //buckets with indexes 1-15
 	{
-	    if (bc.showFull) {
-		writeCommaSeparateFullBucket(nodes, i, bc);
+	    if (hn.showFull) {
+		writeCommaSeparateFullBucket(nodes, i, hn);
 	    } else {
 		XmlNode[] buckets = new XmlNode[nodes.Count];
 		for (int k = 0; k < nodes.Count; k++)
 		{
 		    buckets[k] = SafeXmlParse.selNode(nodes[k], "histo_bucket[@index='" + i + "']");
 		}
-		writeCommaSeparateSumCounts(buckets, bc);
+		writeCommaSeparateSumCounts(buckets, hn);
 	    }
 	}
 	for (int i = 1; i < bucket0s[0].Count; i++) //skip the first sum_count
@@ -1317,255 +1347,29 @@ public static class CsvWriter
 		{
 		    bucket0s_high[k] = bucket0s[k].Item(i);
 		}
-		writeCommaSeparateSumCounts(bucket0s_high, bc);
+		writeCommaSeparateSumCounts(bucket0s_high, hn);
 	    }
 	    catch (IndexOutOfRangeException x) {
 		MB.S("Index out of range exception at " + i.ToString() + " of " + bucket0s[0].Count + ":\n" + x.ToString());
 	    }
 	}
 	bucket0s = null;
-	bc.outfile.Write("\n");
+	hn.outfile.Write("\n");
     }
-}
+}   // CsvWriter
 
 
-///////////
 //
-//
-//
-//
-//
-///////////
-public class PivotChart
+// Xml data importer for PivotChart 
+// 
+public static class XmlToChart
 {
-    private class BetterSeries
-    {
-	protected Series shortSeries, fullSeries, currentSeries;
-	protected Point chartPoint;
-	protected bool showFull { set; get; }
-	private string seriesName;
-	private bool selected, grayed;
-	protected Color backupColor;
-	static Color unselectedColor = Color.FromArgb(32, 32, 32, 32);
-	public BenchRound theBenchRound { set; get; }
-	private AccessType myAccessType;
-
-	public bool getSelected() { return selected; }
-
-	public AccessType getMyAccessType() { return myAccessType; }
-
-	public void updateSelectionColor(int sel)
-	{
-	    if (!selected && sel > 0) {
-		if (!grayed) {
-		    saveBackupColor(shortSeries.Color);
-		    setColor(unselectedColor);
-		    grayed = true;
-		}
-	    } else {
-		setColor(backupColor);
-		saveBackupColor(setColor(backupColor));
-		grayed = false;
-	    }
-	}
-
-	public string deleteFlagYourselfIfSelected()
-	{
-	    if (!selected) return null;
-	    selected = false;
-	    theBenchRound.setDeletionFlag(this.myAccessType);
-	    setSeriesEnabled(false);
-	    return seriesName;
-	}
-
-	public string undeleteYourself()
-	{
-	    theBenchRound.unsetDeletionFlag(this.myAccessType);
-	    setSeriesEnabled(true);
-	    return seriesName;
-	}
-
-	public string finalizeDeletion(Chart sc, Chart fc)
-	{
-	    if (!selected) return null;
-	    sc.Series.Remove(shortSeries);
-	    shortSeries.Dispose();
-	    shortSeries = null;
-	    fc.Series.Remove(fullSeries);
-	    fullSeries.Dispose();
-	    fullSeries = null;
-	    currentSeries = null;
-	    selected = false;
-	    grayed = false;
-	    string s = seriesName;
-	    theBenchRound.setDeletionFlag(this.myAccessType);
-	    theBenchRound = null;
-	    return s;
-	}
-
-	public int toggleSelected(int currently)
-	{
-	    selected = !selected;
-	    if (selected) theBenchRound.flaggedForAverage = true;
-	    else if (currently > 1) updateSelectionColor(currently - 1);
-	    return (selected ? 1 : -1);
-	}
-
-	public bool setFull(bool b)
-	{
-	    showFull = b;
-	    currentSeries = (showFull ? fullSeries : shortSeries);
-	    return showFull;
-	}
-
-	private Series refreshCurrentSeries()
-	{
-	    setFull(showFull);
-	    return currentSeries;
-	}
-
-	public void setSeriesEnabled(bool set)
-	{
-	    shortSeries.Enabled = set;
-	    fullSeries.Enabled = set;
-	}
-
-	public string getSeriesName()
-	{
-	    if (currentSeries == null) return seriesName;
-	    return currentSeries.Name;
-	}
-
-	public Color saveBackupColor(Color c)
-	{
-	    backupColor = c;
-	    return backupColor;
-	}
-
-	public Color setColor(Color c)
-	{
-	    shortSeries.Color = c;
-	    fullSeries.Color = c;
-	    return c;
-	}
-
-	public BetterSeries()
-	{
-	    shortSeries = null;
-	    fullSeries = null;
-	    currentSeries = null;
-	    seriesName = null;
-	    selected = false;
-	    backupColor = unselectedColor;
-	    grayed = false;
-	    myAccessType = AccessType.uninitialized;
-	}
-
-	public Series setContainedSeries(Series series, AccessType type)
-	{
-	    switch (series.Points.Count) {
-	    case (250):
-		if (this.fullSeries == null) fullSeries = series;
-		else MB.S("PivotChart.BetterSeries.setContainedSeries error: full series " + series.Name + " is already set");
-		break;
-	    case (25):
-		if (this.shortSeries == null) shortSeries = series;
-		else MB.S("PivotChart.BetterSeries.setContainedSeries error: short series is already set");
-		break;
-	    default:
-		MB.S("PivotChart.BetterSeries.setContainedSeries error: Found a series with " + series.Points.Count + " points, something went wrong");
-		return series;
-	    }
-
-	    if (seriesName == null)
-	    {
-		seriesName = series.Name;
-		saveBackupColor(series.Color);
-		myAccessType = type;
-	    }
-	    return series;
-	}
-    }
-
-    private class HoverSeries : BetterSeries
-    {
-	private Series initializeHoverSeries(Series s)
-	{
-	    s.ChartType = SeriesChartType.SplineArea;
-	    s.Enabled = false;
-	    s.IsVisibleInLegend = false;
-	    return s;
-	}
-
-	public HoverSeries(PivotChart pivotchart)
-	{
-	    string hts = "hover_short", htf = "hover_full";
-	    pivotchart.shortChart.Series.Add(hts);
-	    shortSeries = initializeHoverSeries(pivotchart.shortChart.Series.FindByName(hts));
-	    pivotchart.fullChart.Series.Add(htf);
-	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series.FindByName(htf));
-	    chartPoint = pivotchart.theBenchChart.chartPoint;
-	}
-    }
-
-    private Chart shortChart, fullChart;
-    public Chart currentChart;
-    private Point chartPoint;
-    private HoverSeries hoverSeries;
-    private BenchChart theBenchChart;
-    private bool showFull { set; get; }
-    private Random randomColorState;
-    private Dictionary<string, BetterSeries> allSeries;
-    private int selectionCount;
-    public List<string> flaggedForDeletion;
-    private Dictionary<string, BetterSeries> partnerSeries;
-
-    public string getBetterSeriesName(BenchRound round, AccessType type)
-    {
-	string append = " (" + (type == AccessType.read ? "read" : "write") + ")";
-	try {
-	    return allSeries[round.customName + append].getSeriesName();
-	}
-	catch (ArgumentException) {
-	    return null;
-	}
-    }
-
-    public int getSelectionCount()
-    {
-	return selectionCount;
-    }
-
-    public int deleteFlagSelected(bool nag) //this is complicated and cumbersome in part because I intended to add an undelete option
-    {
-	Dictionary<string, BetterSeries>.ValueCollection.Enumerator checkus = allSeries.Values.GetEnumerator();
-	string s = null;
-//                List<string> deleteus = new List<string>();
-	while (checkus.MoveNext())
-	{
-	    s = checkus.Current.deleteFlagYourselfIfSelected();
-	    if (s != null) flaggedForDeletion.Add(s);
-	}
-	selectionCount -= flaggedForDeletion.Count;
-	return flaggedForDeletion.Count;
-    }
-
-    public int finalizeDeletions(int howmany)
-    {
-	int ret = flaggedForDeletion.Count;
-	for (int i = 0; i < ret; i++)
-	{
-	    BetterSeries bs = allSeries[flaggedForDeletion[i]];
-	    allSeries.Remove(flaggedForDeletion[i]);
-	    bs.finalizeDeletion(shortChart, fullChart);
-	}
-	flaggedForDeletion.Clear();
-	return ret;
-    }
-
-    private static void writeHexBinsToChart(XmlNode bucket,
-	    double interval_lo, double interval_hi,
-	    Chart c, AccessType type)
+    private static void writeHexBinsToChart(
+	    XmlNode bucket,
+	    double interval_lo, 
+	    double interval_hi,
+	    Chart c, 
+	    AccessType type)
     {
 	//get the midpoint between interval values
 	string sname = (type == AccessType.read ? "read" : "write");
@@ -1580,7 +1384,10 @@ public class PivotChart
 	}
     }
 
-    private static void writeSumCountOnlyToChart(XmlNode bucket, Chart c, AccessType type)
+    private static void writeSumCountOnlyToChart(
+	    XmlNode bucket, 
+	    Chart c, 
+	    AccessType type)
     {
 	string sname = (type == AccessType.read ? "read" : "write");
 	double sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
@@ -1592,8 +1399,8 @@ public class PivotChart
 	c.Series[sname].Points.AddXY(xval, sum_count);
     }
 
-    //get the chart ready. Important for the Series that is produced.
-    private static void writeHistogramToChart(
+    // get the chart ready. Important for the Series that is produced.
+    public static void getHisto(
 	    Chart chart, 
 	    XmlNode stats, 
 	    AccessType type, 
@@ -1647,87 +1454,336 @@ public class PivotChart
 	}
 	histogram = null;
     }
+}   // XmlToChart
 
-    // this constructor is used for storage only - should never be displayed
-    public PivotChart(XmlNode node)
+
+///////////
+//
+//
+// This is new class factored out from PivotChart.
+// This class is the one that has master copy of datapoints.
+//
+///////////
+public class MasterDataChart
+{
+    private Chart mini, full;
+
+    public MasterDataChart(XmlNode node)
     {
-	partnerSeries = new Dictionary<string, BetterSeries>();
-	allSeries = new Dictionary<string, BetterSeries>();
-	hoverSeries = null;
-	randomColorState = new Random(int.Parse("0ddfaced", System.Globalization.NumberStyles.HexNumber));
-	flaggedForDeletion = new List<string>();
-	selectionCount = 0;
+Console.WriteLine("MasterDataChart() constructor");
+	ChartArea ca; 
+	XmlNode stats;
 
-	for (int i = 0; i < 2; i++) {
-	    Chart chart = new Chart();
-//Console.WriteLine("PC_n_6");
-	    ChartArea sumCount = new ChartArea();
-	    sumCount.Name = "sum_count"; //current chart measures individual hex buckets, not sum_count, but I don't feel like changing it
+	mini = new Chart();
+	ca = new ChartArea();
+	ca.Name = "sum_count";
+	mini.ChartAreas.Add(ca);
 
-// XXX mono datavisualization doesn't support Axis props.. 
-	    sumCount.AxisX.ScaleView.Zoomable = true;
-	    sumCount.AxisY.ScaleView.Zoomable = true;
-	    sumCount.AxisY.Title = "Sample count";
-	    sumCount.AxisX.Title = "Latency interval (2^x ns)";
-	    Legend legend1 = new Legend();
-	    legend1.Name = "Legend1";
-	    chart.ChartAreas.Add(sumCount);
-	    chart.Name = "Statistics";
-	    chart.Legends.Add(legend1);
-	    chart.TabIndex = 1;
-	    chart.Text = (i == 1 ? "hex_bins" : "sum_count");
-	    XmlNode stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
-	    writeHistogramToChart(chart, stats, AccessType.read, Color.Blue, i == 1);
-	    writeHistogramToChart(chart, stats, AccessType.write, Color.Red, i == 1);
-	    stats = null;
-	    switch (i) {
-	    case (0):
-		shortChart = chart;
+	full = new Chart();
+	ca = new ChartArea();
+	ca.Name = "sum_count";
+	full.ChartAreas.Add(ca);
+
+	stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
+	XmlToChart.getHisto(mini, stats, AccessType.read, Color.Blue, false);
+	XmlToChart.getHisto(mini, stats, AccessType.write, Color.Red, false);
+
+	stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
+	XmlToChart.getHisto(full, stats, AccessType.read, Color.Blue, true);
+	XmlToChart.getHisto(full, stats, AccessType.write, Color.Red, true);
+
+	stats = null;
+    }
+
+    public Chart getDataChart(DetailLevel detail)
+    {
+	switch (detail) {
+	case (DetailLevel.minitype):
+	    return mini;
+	case (DetailLevel.fulltype):
+	    return full;
+	case (DetailLevel.currenttype):
+	    MB.S("MDC::getChart : unsupported detail level");
+	    return null;
+	default:
+	    return null;
+	}
+    }
+}
+
+///////////
+//
+//
+//
+//
+//
+///////////
+public class PivotChart
+{
+    private class BetterSeries
+    {
+	protected Series miniSeries, fullSeries;
+	protected Series currentSeries;
+	protected bool showFull { set; get; }
+	private string seriesName;
+
+	public bool selected { set; get;}
+	private bool grayed {set; get;}
+
+	protected Color backupColor;
+	static Color unselectedColor = Color.FromArgb(32, 32, 32, 32);
+	public BenchRound theBenchRound { set; get; }
+	private AccessType myAccessType;
+
+	public AccessType getMyAccessType() { return myAccessType; }
+
+	public void updateSelectionColor(int sel)
+	{
+	    if (!selected && sel > 0) {
+		if (!grayed) {
+		    saveBackupColor(miniSeries.Color);
+		    setColor(unselectedColor);
+		    grayed = true;
+		}
+	    } else {
+		setColor(backupColor);
+		saveBackupColor(setColor(backupColor));
+		grayed = false;
+	    }
+	}
+
+	public string deleteFlagYourselfIfSelected()
+	{
+	    if (!selected) return null;
+	    selected = false;
+	    theBenchRound.setDeletionFlag(this.myAccessType);
+	    setSeriesEnabled(false);
+	    return seriesName;
+	}
+
+	public string undeleteYourself()
+	{
+	    theBenchRound.unsetDeletionFlag(this.myAccessType);
+	    setSeriesEnabled(true);
+	    return seriesName;
+	}
+
+	public string finalizeDeletion(Chart sc, Chart fc)
+	{
+	    if (!selected) return null;
+	    sc.Series.Remove(miniSeries);
+	    miniSeries.Dispose();
+	    miniSeries = null;
+	    fc.Series.Remove(fullSeries);
+	    fullSeries.Dispose();
+	    fullSeries = null;
+	    currentSeries = null;
+	    selected = false;
+	    grayed = false;
+	    string s = seriesName;
+	    theBenchRound.setDeletionFlag(this.myAccessType);
+	    theBenchRound = null;
+	    return s;
+	}
+
+	public int toggleSelected(int currently)
+	{
+	    selected = !selected;
+
+	    if (selected) {
+		theBenchRound.flaggedForAverage = true;
+	    } else if (currently > 1) {
+		updateSelectionColor(currently - 1);
+	    }
+	    return (selected ? 1 : -1);
+	}
+
+	public bool setFull(bool b)
+	{
+	    showFull = b;
+	    currentSeries = (showFull ? fullSeries : miniSeries);
+	    return showFull;
+	}
+
+	public void setSeriesEnabled(bool set)
+	{
+	    miniSeries.Enabled = set;
+	    fullSeries.Enabled = set;
+	}
+
+	public string getSeriesName()
+	{
+	    if (currentSeries == null) return seriesName;
+	    return currentSeries.Name;
+	}
+
+	public Color saveBackupColor(Color c)
+	{
+	    backupColor = c;
+	    return backupColor;
+	}
+
+	public Color setColor(Color c)
+	{
+	    miniSeries.Color = c;
+	    fullSeries.Color = c;
+	    return c;
+	}
+
+	public BetterSeries()
+	{
+	    miniSeries = null;
+	    fullSeries = null;
+	    currentSeries = null;
+	    seriesName = null;
+	    selected = false;
+	    backupColor = unselectedColor;
+	    grayed = false;
+	    myAccessType = AccessType.uninitialized;
+	}
+
+	public Series setContainedSeries(Series series, AccessType type)
+	{
+	    switch (series.Points.Count) {
+	    case (250):
+		if (this.fullSeries == null) fullSeries = series;
+		else MB.S("setContainedSeries: full series " + series.Name + " is already set");
 		break;
-	    case (1):
-		fullChart = chart;
+	    case (25):
+		if (this.miniSeries == null) miniSeries = series;
+		else MB.S("setContainedSeries: mini series is already set");
 		break;
 	    default:
-		MB.S("new pivot chart from xmlnode error: " + i);
-		break;
+		MB.S("setContainedSeries: Found a series with " + series.Points.Count + " points, something went wrong");
+		return series;
 	    }
+
+	    if (seriesName == null) {
+		seriesName = series.Name;
+		saveBackupColor(series.Color);
+		myAccessType = type;
+	    }
+	    return series;
 	}
     }
 
-    // this constructor is used to produced the displayed chart 
-    public PivotChart(BenchChart bc, int width, int height)
+    private class HoverSeries : BetterSeries
     {
-	partnerSeries = new Dictionary<string, BetterSeries>();
+	private Series initializeHoverSeries(Series s)
+	{
+Console.WriteLine("initializeHoverSeries called");
+	    s.ChartType = SeriesChartType.SplineArea;
+	    s.Enabled = false;
+	    s.IsVisibleInLegend = false;
+	    return s;
+	}
+
+	public HoverSeries(PivotChart pivotchart)
+	{
+	    string hts = "hover_short", htf = "hover_full";
+
+	    pivotchart.miniChart.Series.Add(hts);
+	    miniSeries = initializeHoverSeries(pivotchart.miniChart.Series.FindByName(hts));
+
+	    pivotchart.fullChart.Series.Add(htf);
+	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series.FindByName(htf));
+	}
+    }
+
+    private Chart miniChart, fullChart;
+    public Chart currentChart;	//mini or full toggle
+    private HoverSeries hoverSeries;
+    private Harness harness;
+    private bool showFull { set; get; }
+    private Random randomColorState;
+
+    private Dictionary<string, BetterSeries> allSeries;
+    private int selectionCount;
+    public List<string> flaggedForDeletion;
+    private Dictionary<string, BetterSeries> partnerSeries;
+
+    public string getBetterSeriesName(BenchRound round, AccessType type)
+    {
+	string append = " (" + (type == AccessType.read ? "read" : "write") + ")";
+	try {
+	    return allSeries[round.customName + append].getSeriesName();
+	}
+	catch (ArgumentException) {
+	    return null;
+	}
+    }
+
+    public int getSelectionCount()
+    {
+	return selectionCount;
+    }
+    
+    //this is complicated and cumbersome in part 
+    //because I intended to add an undelete option
+    public int deleteFlagSelected(bool nag)
+    {
+	var checkus = allSeries.Values.GetEnumerator();
+	string s = null;
+
+//                List<string> deleteus = new List<string>();
+	while (checkus.MoveNext()) {
+	    s = checkus.Current.deleteFlagYourselfIfSelected();
+	    if (s != null) flaggedForDeletion.Add(s);
+	}
+	selectionCount -= flaggedForDeletion.Count;
+	return flaggedForDeletion.Count;
+    }
+
+    public int finalizeDeletions(int howmany)
+    {
+	int ret = flaggedForDeletion.Count;
+	for (int i = 0; i < ret; i++)
+	{
+	    BetterSeries bs = allSeries[flaggedForDeletion[i]];
+	    allSeries.Remove(flaggedForDeletion[i]);
+	    bs.finalizeDeletion(miniChart, fullChart);
+	}
+	flaggedForDeletion.Clear();
+	return ret;
+    }
+
+    // this constructor is used to produced the displayed chart 
+    public PivotChart(Harness hn, int width, int height)
+    {
+Console.WriteLine("PivotChart() constructor");
 	allSeries = new Dictionary<string, BetterSeries>();
+	partnerSeries = new Dictionary<string, BetterSeries>();
 	hoverSeries = null;
 	randomColorState = new Random(int.Parse("0ddfaced", System.Globalization.NumberStyles.HexNumber));
 	flaggedForDeletion = new List<string>();
 	selectionCount = 0;
 
-	this.theBenchChart = bc;
-	chartPoint = theBenchChart.chartPoint;
+	this.harness = hn;
 
 	for (int i = 0; i < 2; i++) {
 	    string s = null;
 	    Chart chart = new Chart();
 	    ChartArea histogram = new ChartArea();
 	    histogram.Name = "histogram";
-	    histogram.AxisX.ScaleView.Zoomable = true;
-	    histogram.AxisY.ScaleView.Zoomable = true;
-	    histogram.AxisY.Title = "Sample count";
 	    histogram.AxisX.Title = "Latency interval (2^x ns)" + s;
+	    histogram.AxisX.ScaleView.Zoomable = true;
+
+	    histogram.AxisY.Title = "Sample count";
+	    histogram.AxisY.ScaleView.Zoomable = true;
+	    //histogram.AxisY.IsLogarithmic = true;
+
 	    Legend legend1 = new Legend();
 	    legend1.Name = "Legend";
 	    legend1.DockedToChartArea = "histogram";
 	    legend1.IsDockedInsideChartArea = true;
 
 	    chart.ChartAreas.Add(histogram);
-	    chart.Name = "Latency histogram (" + (i == 0 ? "short)" : "full)");
+	    chart.Name = "Latency histogram (" + (i == 0 ? "mini)" : "full)");
 	    chart.Legends.Add(legend1);
 	    chart.TabIndex = 1;
 	    chart.Text = "histogram";
 
-	    chart.MouseWheel += chartZoom;
+//	    chart.MouseWheel += chartZoom;
 	    chart.MouseEnter += chartMouseEnter;
 	    chart.MouseLeave += chartMouseLeave;
 	    chart.MouseMove += chartMouseHover;
@@ -1736,7 +1792,7 @@ public class PivotChart
 	    chart.Height = height;
 	    switch (i) {
 	    case (0):
-		shortChart = chart;
+		miniChart = chart;
 		break;
 	    case (1):
 		fullChart = chart;
@@ -1750,65 +1806,76 @@ public class PivotChart
 
     public bool setFull(bool b)
     {
-	try
-	{
-	    showFull = hoverSeries.setFull(b);
-	    currentChart = (showFull ? fullChart : shortChart);
-	}
-	catch (NullReferenceException x)
-	{
-	    MB.S("PivotChart.setFull(" + b.ToString() + ")null reference exception"+x.ToString());
-	}
+	showFull = hoverSeries.setFull(b);
+	currentChart = (showFull ? fullChart : miniChart);
+
 	return showFull;
     }
 
-    public void updateHoverSeries(Series s)
+    public void createHoverSeries()
     {
 	if (hoverSeries != null) {
-	    hoverSeries.setSeriesEnabled(false);
-
-	    if (s != null) {
-		hoverSeries.setColor(s.Color);
-		try {
-		    currentChart.Series[hoverSeries.getSeriesName()].Points.Clear();
-		    currentChart.DataManipulator.CopySeriesValues(s.Name, hoverSeries.getSeriesName());
-		    hoverSeries.setSeriesEnabled(true);
-		}
-		catch (ArgumentException x) {
-		    MB.S("Argument exception. Series name is " + s.Name + ".\n" + x.ToString());
-		}
-	    }
-	} else {
-	    hoverSeries = new HoverSeries(this);
+Console.WriteLine("createHoverSeries(): already exists");
+	    return;
 	}
+	hoverSeries = new HoverSeries(this);
+
+	hoverSeries.setSeriesEnabled(true);
     }
 
-    private static HitTestResult getHitTestResult(Chart c, Point mousepos, Point chartpoint)
+    /*
+     * called by mouse hover event handler
+     */
+    private void updateHoverSeries(Series s)
     {
-	chartpoint.X = mousepos.X;
-	chartpoint.Y = mousepos.Y;
-	return c.HitTest(c.PointToClient(chartpoint).X, c.PointToClient(chartpoint).Y);
+	if (s == null) return;
+
+	hoverSeries.setColor(s.Color);
+
+	// redrawing by copying data series is expensive..
+	currentChart.Series[hoverSeries.getSeriesName()].Points.Clear();
+	currentChart.DataManipulator.CopySeriesValues(s.Name, hoverSeries.getSeriesName());
+
     }
 
-    private static void chartMouseEnter(object sender, EventArgs e)
+    private static HitTestResult getHitTestResult( Chart c, Point mousepos)
+    {
+	Point point = new Point();
+	
+	point.X = mousepos.X;
+	point.Y = mousepos.Y;
+
+	return c.HitTest(c.PointToClient(point).X, c.PointToClient(point).Y);
+    }
+
+    private void chartMouseEnter(object sender, EventArgs e)
     {
 	Chart theChart = sender as Chart;
 	if (!theChart.Focused) theChart.Focus();
+
+	hoverSeries.setSeriesEnabled(true);
     }
+
+    private void chartMouseLeave(object sender, EventArgs e)
+    {
+	Chart theChart = sender as Chart;
+	if (theChart.Focused) theChart.Parent.Focus();
+
+	hoverSeries.setSeriesEnabled(false);
+    }
+
 
     public void chartMouseHover(object sender, EventArgs args)
     {
-	HitTestResult htr = getHitTestResult(currentChart, Control.MousePosition, chartPoint);
+	HitTestResult htr = getHitTestResult(currentChart, 
+		Control.MousePosition);
 
 	if (htr.ChartElementType == ChartElementType.LegendItem) {
-	    if (htr.Object == null) {
-		MB.S("PivotChart.chartMouseHover error: Null HTR");
-	    } else {
-		updateHoverSeries(currentChart.Series[(htr.Object as LegendItem).SeriesName]);
-	    }
-	} else {
-	    updateHoverSeries(null);
-	}
+	    if (htr.Object == null) return; //error?
+
+	    Series s = currentChart.Series[(htr.Object as LegendItem).SeriesName];
+	    updateHoverSeries(s);
+	} 
     }
 
     private void toggleSelection(BetterSeries bs)
@@ -1816,122 +1883,114 @@ public class PivotChart
 	selectionCount += bs.toggleSelected(selectionCount);
     }
 
+    /*
+     * called both internally and by Harness when series deleted
+     */
     public void refreshSelectionColors()
     {
 	if (selectionCount < 0) {
 	    MB.S("refreshSelectionColors error: negative selction count"); 
-	} else {
-	    Dictionary<string, BetterSeries>.ValueCollection.Enumerator checkus = allSeries.Values.GetEnumerator();
-	    while (checkus.MoveNext())
-	    {
-		checkus.Current.updateSelectionColor(selectionCount);
-	    }
-	    if (true) theBenchChart.pmgraph.updateSelectionButtons(selectionCount);
+	    return;
+	} 
+
+	var iter = allSeries.Values.GetEnumerator();
+	while (iter.MoveNext()) {
+	    iter.Current.updateSelectionColor(selectionCount);
 	}
+
+	harness.pmgraph.updateSelectionButtons(selectionCount);
     }
 
     public void selectAll()
     {
-	Dictionary<string, BetterSeries>.ValueCollection.Enumerator checkus = allSeries.Values.GetEnumerator();
-	{
-	    while (checkus.MoveNext())
-	    {
-		if (!checkus.Current.getSelected()) toggleSelection(checkus.Current);
-	    }
+	var iter = allSeries.Values.GetEnumerator();
+	while (iter.MoveNext()) {
+	    if (!iter.Current.selected) toggleSelection(iter.Current);
 	}
-	theBenchChart.pmgraph.updateSelectionButtons(selectionCount);
+	harness.pmgraph.updateSelectionButtons(selectionCount);
     }
 
     public void selectNone()
     {
-	Dictionary<string, BetterSeries>.ValueCollection.Enumerator checkus = allSeries.Values.GetEnumerator();
-	{
-	    while (checkus.MoveNext())
-	    {
-		if (checkus.Current.getSelected()) toggleSelection(checkus.Current);
-	    }
+	var iter = allSeries.Values.GetEnumerator();
+	while (iter.MoveNext()) {
+	    if (iter.Current.selected) toggleSelection(iter.Current);
 	}
     }
 
     private void chartMouseClick(object sender, EventArgs e)
     {
 	MouseEventArgs mouseargs = (MouseEventArgs)e;
-	HitTestResult htr = getHitTestResult(currentChart, Control.MousePosition, chartPoint);
-	if (htr.ChartElementType == ChartElementType.LegendItem)
-	{
-	    if (htr.Object == null) {
-		MB.S("PivotChart.chartMouseClick error: Null HTR");
-	    } else {
-		LegendItem item = htr.Object as LegendItem;
+	HitTestResult htr = getHitTestResult(currentChart,
+		Control.MousePosition);
 
-		switch (mouseargs.Button) {
-		case (MouseButtons.Middle):
-		    allSeries[item.SeriesName].theBenchRound.seriesObject.displaySpikes(); 
-		    break;
-		case (MouseButtons.Right):
-		    break;
-		case (MouseButtons.Left):
-		    try
-		    {
-			BetterSeries bs = this.allSeries[item.SeriesName];
-			toggleSelection(bs); 
-			toggleSelection(partnerSeries[bs.getSeriesName()]);
-			refreshSelectionColors(); 
-		    }
-		    //catch (KeyNotFoundException x)
-		    catch (KeyNotFoundException ) {
-			MB.S("PivotChart.toggleLegendItemSelected error: key " + item.SeriesName + " not found.");
-		    }
-		    break;
-		}
+	if (htr.ChartElementType != ChartElementType.LegendItem) return;
+	
+	// clicked on legend
+	if (htr.Object == null) {
+	    MB.S("chartMouseClick error: Null HTR");
+	    return;
+	} 
+
+	LegendItem li = htr.Object as LegendItem;
+
+	switch (mouseargs.Button) {
+	case (MouseButtons.Middle):
+	    allSeries[li.SeriesName].theBenchRound.seriesObject.displaySpikes();
+	    break;
+	case (MouseButtons.Left):
+	    try {
+		BetterSeries bs = this.allSeries[li.SeriesName];
+		toggleSelection(bs); 
+		toggleSelection(partnerSeries[bs.getSeriesName()]);
+		refreshSelectionColors(); 
 	    }
+	    catch (KeyNotFoundException) {
+		MB.S("toggleLegendItemSelection: key " 
+			+ li.SeriesName + " not found.");
+	    }
+	    break;
+	case (MouseButtons.Right):
+	    break;
 	}
     }
 
     private static void chartZoom(object sender, MouseEventArgs args)
     {
 	Chart theChart = sender as Chart;
-	try
-	{
-	    Axis x = theChart.ChartAreas.FindByName("histogram").AxisX;
-	    Axis y = theChart.ChartAreas.FindByName("histogram").AxisY;
-	    double xMin = x.ScaleView.ViewMinimum, xMax = x.ScaleView.ViewMaximum;
-	    double yMin = y.ScaleView.ViewMinimum, yMax = y.ScaleView.ViewMaximum;
-	    double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
 
-	    if (args.Delta < 0) {
-		x1 = x.PixelPositionToValue(args.Location.X)- (xMax - xMin) * 2;
-		x2 = x.PixelPositionToValue(args.Location.X)+ (xMax - xMin) * 2;
-		y1 = y.PixelPositionToValue(args.Location.Y)- (yMax - yMin) * 2;
-		y2 = y.PixelPositionToValue(args.Location.Y)+ (yMax - yMin) * 2;
-	    }
+	Axis x = theChart.ChartAreas.FindByName("histogram").AxisX;
+	Axis y = theChart.ChartAreas.FindByName("histogram").AxisY;
 
-	    if (args.Delta > 0) {
-		x1 = x.PixelPositionToValue(args.Location.X)- (xMax - xMin) / 2;
-		x2 = x.PixelPositionToValue(args.Location.X)+ (xMax - xMin) / 2;
-		y1 = y.PixelPositionToValue(args.Location.Y)- (yMax - yMin) / 2;
-		y2 = y.PixelPositionToValue(args.Location.Y)+ (yMax - yMin) / 2;
-	    }
-	    x.ScaleView.Zoom(x1, x2);
-	    y.ScaleView.Zoom(y1, y2);
+	double xMin = x.ScaleView.ViewMinimum;
+	double xMax = x.ScaleView.ViewMaximum;
+	double yMin = y.ScaleView.ViewMinimum;
+	double yMax = y.ScaleView.ViewMaximum;
+
+	double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+
+	if (args.Delta < 0) {
+	    x1 = x.PixelPositionToValue(args.Location.X)- (xMax - xMin) * 2;
+	    x2 = x.PixelPositionToValue(args.Location.X)+ (xMax - xMin) * 2;
+	    y1 = y.PixelPositionToValue(args.Location.Y)- (yMax - yMin) * 2;
+	    y2 = y.PixelPositionToValue(args.Location.Y)+ (yMax - yMin) * 2;
 	}
-	catch (Exception x) {
-	    MB.S("Zoom error:\n" + x.ToString());
-	    return;
+
+	if (args.Delta > 0) {
+	    x1 = x.PixelPositionToValue(args.Location.X)- (xMax - xMin) / 2;
+	    x2 = x.PixelPositionToValue(args.Location.X)+ (xMax - xMin) / 2;
+	    y1 = y.PixelPositionToValue(args.Location.Y)- (yMax - yMin) / 2;
+	    y2 = y.PixelPositionToValue(args.Location.Y)+ (yMax - yMin) / 2;
 	}
+	x.ScaleView.Zoom(x1, x2);
+	y.ScaleView.Zoom(y1, y2);
     }
 
-    private static void chartMouseLeave(object sender, EventArgs e)
-    {
-	Chart theChart = sender as Chart;
-	if (theChart.Focused) theChart.Parent.Focus();
-    }
-
-    public Chart getPivotChart(DetailLevel detail)
+    public Chart getChart(DetailLevel detail)
     {
 	switch (detail) {
-	case (DetailLevel.shorttype):
-	    return shortChart;
+	case (DetailLevel.minitype):
+	    return miniChart;
 	case (DetailLevel.fulltype):
 	    return fullChart;
 	case (DetailLevel.currenttype):
@@ -1955,66 +2014,89 @@ public class PivotChart
 	return randomColorState.Next() | (read ? int.Parse("ff0000a0", System.Globalization.NumberStyles.HexNumber) : int.Parse("ffff0000", System.Globalization.NumberStyles.HexNumber));
     }
 
-    private Series collectDataPoints(BenchRound br, DetailLevel detail, AccessType type, int i) 
+    /*
+     * produce Series from BenchRound using options
+     * it populates internal objects along the way. Ugh
+     * (old name: collectDataPoints()) 
+     */
+    private Series produceSeries(
+	    BenchRound br,
+	    DetailLevel detail,
+	    AccessType type,
+	    int i) 
     {
-	Series s = null;
-	try {
-	    string sname = (type == AccessType.read ? "read" : "write");
-	    Chart chart = br.getRoundChart(detail);
-	    s = new Series();
-	    s.ChartArea = "histogram";
-	    s.Legend = "Legend";
-	    s.Name = theBenchChart.getPivotDumpHeader(i) + " (" + sname + ")";
-	    if (detail == DetailLevel.fulltype) br.registerSeriesName(s.Name, type);
-	    DataPointCollection r = chart.Series[sname].Points;                  
-	    DataPoint[] dp = new DataPoint[chart.Series[sname].Points.Count];
-	    chart.Series[sname].Points.CopyTo(dp, 0);
-	    for (int j = 0; j < dp.Length; j++)
-	    {
-		s.Points.Insert(j, dp[j]);
-	    }
-	    s.ChartType = SeriesChartType.FastLine;
-	    if (i <= 6) s.Color = (type == AccessType.read ? readColors[i] : writeColors[i]);
-	    else s.Color = Color.FromArgb(getRandomColorState(type == AccessType.read));
-	    s.BorderWidth = 2;
-	    BetterSeries bs = allSeries[s.Name];
-	    bs.setContainedSeries(s, type);
+	string sname = (type == AccessType.read ? "read" : "write");
+
+	// this produces Chart of data pivotchart of benchround..
+	Chart chart = br.getDataChart(detail);	
+	Series series = new Series();
+
+	series.ChartArea = "histogram";
+	series.Legend = "Legend";
+	series.Name = harness.getPivotDumpHeader(i) + " (" + sname + ")";
+
+	if (detail == DetailLevel.fulltype) {
+	    br.registerSeriesName(series.Name, type);
 	}
-	catch (KeyNotFoundException) {
-	    BetterSeries bs = new BetterSeries();
-	    bs.setContainedSeries(s, type);
-	    allSeries[s.Name] = bs;
+
+	// copying data points 
+	DataPoint[] dp = new DataPoint[chart.Series[sname].Points.Count];
+
+//Console.WriteLine("DataPiont Length:{0}", dp.Length);
+	// copy points data from Series[sname] to dp array starting at idx 0: 
+	chart.Series[sname].Points.CopyTo(dp, 0);
+	// now insert the points to new series one by one
+	for (int j = 0; j < dp.Length; j++) {
+	    series.Points.Insert(j, dp[j]);
+	}
+
+	// set chart graphic properties
+	series.BorderWidth = 2;
+	series.ChartType = SeriesChartType.FastLine;
+	if (i <= 6) {
+	    series.Color = (type == AccessType.read ? readColors[i] : writeColors[i]);
+	} else {
+	    series.Color = Color.FromArgb(getRandomColorState(type == AccessType.read));
+	}
+
+	// take care of BetterSeries 
+	// (got rid of try/catch KeyNotFoundException)
+	BetterSeries bs;
+	if (allSeries.TryGetValue(series.Name, out bs)) {
+Console.WriteLine("produceSeries: reusing BetterSeries");
+	    bs.setContainedSeries(series, type);
+	} else {
+Console.WriteLine("produceSeries: Creating new BetterSeries");
+	    bs = new BetterSeries();
+	    bs.setContainedSeries(series, type);
+	    allSeries[series.Name] = bs;
 	    bs.theBenchRound = br;
-	    string pname = theBenchChart.getPivotDumpHeader(i) + " (" + (type == AccessType.read ? "write" : "read") + ")";
+	    // add to partnerlookup
+	    string pname = harness.getPivotDumpHeader(i) + " (" + (type == AccessType.read ? "write" : "read") + ")";
 	    partnerSeries.Add(pname, bs);
 	}
-	catch (ArgumentNullException x) {
-	    MB.S("collectDataPoints null argument exception\n" + x.ToString());
-	}
-	catch (NullReferenceException x) {
-	    MB.S("collectDataPoint null reference exception\n" + x.ToString());
-	}
-	return s;
+
+	return series;
     }
 
-    public void addCollectedPoints(BenchRound br, AccessType s, int i)
+    /*
+     * called by Harness initializePivotChart
+     * (old name: addCollectedPoints())
+     */
+    public void addSeries(BenchRound br, AccessType s, int i)
     {
-	if (br == null) MB.S("Fcuk");
-	if (shortChart == null) MB.S("shjit");
-	if (shortChart.Series == null) MB.S("Damn");
+	Series series;
+	
+	// sanity check
+	if (miniChart == null || miniChart.Series == null) MB.S("shjit");
 
-	try {
-	    shortChart.Series.Add(collectDataPoints(br, DetailLevel.shorttype, s, i));
-	    fullChart.Series.Add(collectDataPoints(br, DetailLevel.fulltype, s, i));
-	}
-	catch (NullReferenceException x) {
-	    MB.S(
-		"addCollectedPoints exception:\n" + 
-		"full chart is " + (fullChart == null ? "INDEED" : "NOT") + " null;\n" +
-		"short chart is " + (shortChart == null ? "INDEED" : "NOT") + " null;\n" +
-		x.ToString()
-	   );
-	}
+	// add mini series
+	series = produceSeries(br, DetailLevel.minitype, s, i);
+	miniChart.Series.Add(series);
+	
+	// add full series
+	series = produceSeries(br, DetailLevel.fulltype, s, i);
+	fullChart.Series.Add(series);
     }
 }   // PivotChart
 
@@ -2030,18 +2112,17 @@ public class PivotChart
 
 // a benchmark with comparisons to some other stuff
 //public class BenchPivot {
-public class BenchChart
+public class Harness
 {
-    private PivotChart thePivotChart;
     public int pivotIndex;
     public ParamSet baseParams;
-    public List<BenchRound> cronies;
+    public List<BenchRound> rounds;
+    private PivotChart thePivotChart;
     private bool chartReady;
     public PmGraph pmgraph;
     public StreamWriter outfile;
     public bool dumped = false;
     public bool showFull { set; get; }
-    public Point chartPoint;
 
     public void selectAll()
     {
@@ -2077,6 +2158,7 @@ public class BenchChart
     public BenchSiblings averageSelected(int avgc)
     {
 	pmgraph.updateSelectionButtons(0);
+
 	XmlDocument doc = new XmlDocument();
 	XmlNode fakeSeries = doc.CreateNode(XmlNodeType.Element, "test_nice", doc.NamespaceURI);
 	doc.AppendChild(fakeSeries);
@@ -2084,28 +2166,29 @@ public class BenchChart
 	int flagcount = 0;
 
 	try {
-	    for (int j = 0; j < cronies.Count; j++)
-	    {
-		if (cronies[j].flaggedForAverage)
-		{
-		    XmlDocument tempdoc = cronies[j].roundNode.OwnerDocument;
-		    XmlNode fakeRound = doc.CreateNode(XmlNodeType.Element, "test_round", doc.NamespaceURI);
-		    XmlAttribute iter = doc.CreateAttribute("iter");
-		    iter.Value = (flagcount++ + 1).ToString();
-		    fakeRound.Attributes.Append(iter);
-		    if (SafeXmlParse.selNode(tempdoc, "test_nice/test_round/pmbenchmark") == null)
-		    {
-			MB.S("pmbenchmark node not found; root element is " + tempdoc.DocumentElement.Name);
-		    }
-		    fakeRound.AppendChild(doc.ImportNode(SafeXmlParse.selNode(tempdoc, "test_nice/test_round/pmbenchmark"), true));
-		    fakeSeries.AppendChild(fakeRound);
-		    ps.setParamsFromNode(PmGraph.getParamsNodeFromSeriesNode(fakeSeries));
-		    ps.operatingSystem = SafeXmlParse.selNode(tempdoc, "test_nice/test_round/pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
+	    foreach (var r in rounds) {
+		if (!r.flaggedForAverage) continue;
+
+		XmlDocument tempdoc = r.roundNode.OwnerDocument;
+		XmlNode fakeRound = doc.CreateNode(XmlNodeType.Element, 
+			"test_round", 
+			doc.NamespaceURI);
+		XmlAttribute iter = doc.CreateAttribute("iter");
+		iter.Value = (flagcount++ + 1).ToString();
+		fakeRound.Attributes.Append(iter);
+		if (SafeXmlParse.selNode(tempdoc, 
+			    "test_nice/test_round/pmbenchmark") == null) {
+		    MB.S("pmbenchmark node not found; root element is " + tempdoc.DocumentElement.Name);
 		}
+		fakeRound.AppendChild(doc.ImportNode(SafeXmlParse.selNode(tempdoc, "test_nice/test_round/pmbenchmark"), true));
+		fakeSeries.AppendChild(fakeRound);
+		ps.setParamsFromNode(PmGraph.getParamsNodeFromSeriesNode(fakeSeries));
+		ps.operatingSystem = SafeXmlParse.selNode(tempdoc, 
+			"test_nice/test_round/pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
 	    }
 	}
 	catch (FileNotFoundException x) {
-	    MB.S("averageSelected:\n" + x.ToString());
+	    MB.S("averageSelected: FileNotFoundException\n" + x.ToString());
 	    return null;
 	}
 	catch (ArgumentException x) {
@@ -2129,35 +2212,39 @@ public class BenchChart
     {
 	bool debug = false;
 	int deleted = thePivotChart.finalizeDeletions(thePivotChart.flaggedForDeletion.Count);
-	if (deleted > 0)
-	{
-	    for (int i = 0; i < cronies.Count; i++)
-	    {
-		if (cronies[i].hasPendingDeletions) cronies[i].deleteSelectedSeries(); 
+
+	if (deleted > 0) {
+	    foreach (var r in rounds) {
+		if (r.hasPendingDeletions) r.deleteSelectedSeries(); 
 	    }
-	    int j = cronies.Count - 1;
-	    while (j >= 0)
-	    {
-		if (!cronies[j].hasReadSeries && !cronies[j].hasWriteSeries)
-		{
-		    if (debug) MB.S(cronies[j].customName + " has neither a write nor a read series, deleting it now");
-		    string s = cronies[j].customName;
-		    cronies.RemoveAt(j);
+
+	    // have no idea what it does below..
+	    int j = rounds.Count - 1;
+	    while (j >= 0) {
+		if (!rounds[j].hasReadSeries && !rounds[j].hasWriteSeries) {
+		    if (debug) MB.S(rounds[j].customName + " has neither a write nor a read series, deleting it now");
+		    string s = rounds[j].customName;
+		    rounds.RemoveAt(j);
 		    pmgraph.removeDeadXmlDoc(s);
+		} else if (debug) {
+		    MB.S(rounds[j].customName + " still has a series"); 
 		}
-		else if (debug) MB.S(cronies[j].customName + " still has a series"); 
 		j--;
 	    }
 	}
 
 	if (debug) {
 	    string cronytest = "";
-	    for (int i = 0; i < cronies.Count; i++)
-	    {
-		cronytest += cronies[i].customName + " has " + (cronies[i].hasReadSeries && cronies[i].hasWriteSeries ? "both" : (cronies[i].hasReadSeries ? "read" : (cronies[i].hasWriteSeries ? "write" : ""))) + "\n";
+	    foreach (var r in rounds) {
+		cronytest += r.customName + " has " + 
+		    (r.hasReadSeries && r.hasWriteSeries ? "both" : 
+		     (r.hasReadSeries ? "read" : 
+		      (r.hasWriteSeries ? "write" : ""))) + "\n";
 	    }
-	    MB.S("Done deleting, pivot now has " + cronies.Count + " cronies:\n" + cronytest);
+	    MB.S("Done deleting, pivot now has " 
+		    + rounds.Count + " rounds:\n" + cronytest);
 	}
+
 	thePivotChart.refreshSelectionColors();
 	return deleted;
     }
@@ -2167,26 +2254,35 @@ public class BenchChart
 	return thePivotChart.deleteFlagSelected(nag);
     }
 
-    private bool setFull(bool b)
+    public bool setFull(bool b)
     {
 	showFull = thePivotChart.setFull(b);
 	return showFull;
     }
 
-    public bool refreshFull(CheckBox b)
+    // this constructor is for embedded 'manual' 
+    public Harness(PmGraph pmg)
     {
-	return (b == null ? setFull(showFull) : setFull(b.Checked));
+	thePivotChart = null;
+	chartReady = false;
+	baseParams = null;
+	pivotIndex = 9;
+	rounds = new List<BenchRound>(); // empty initially.
+	pmgraph = pmg;
     }
 
-    public BenchChart(ParamSet ps, int pivotindex, List<BenchRound> br, PmGraph pmg)
+    public Harness(
+	    ParamSet ps,
+	    int pivotindex,
+	    List<BenchRound> br,
+	    PmGraph pmg)
     {
 	thePivotChart = null;
 	chartReady = false;
 	baseParams = ps;
 	pivotIndex = pivotindex;
-	cronies = br;
+	rounds = br;
 	pmgraph = pmg;
-	chartPoint = new Point(); 
     }
 
     public string getPivotDumpHeader(int i)
@@ -2195,58 +2291,33 @@ public class BenchChart
     }
 
     /*
-     * called by PmGraph.graphManual()
+     * called by getPreparedChart when not populated
      */
-    public Chart getPreparedChart(int w, int h, CheckBox b)
+    private Chart initializePivotChart(int width, int height) 
     {
-	if (!chartReady) return initializePivotChart(w, h, b); 
-
-	try {
-	    Chart pivotChart = thePivotChart.getPivotChart(DetailLevel.currenttype);
-	    pivotChart.Width = w;
-	    pivotChart.Height = h;
-	    return pivotChart;
-	}
-	catch (NullReferenceException x) {
-	    MB.S("getPreparedChart info: null reference exception, the pivot chart is " + ((thePivotChart != null) ? "NOT" : "") + " null.\n" + x.ToString());
-	    return null;
-	}
-    }
-
-    private Chart initializePivotChart(int width, int height, CheckBox b) 
-    {
-	if (this.cronies == null) {
-	    MB.S("initializePivotChart : cronies list is null!");
-	    return null;
+	foreach (var round in rounds) {
+	    round.populateDataChart();
 	}
 
-	for (int i = 0; i < cronies.Count; i++)
-	{
-	    if (cronies[i] == null) {
-		MB.S("initPivotCharts Error: crony " + i + " is null!");
-		return null;
-	    }
-	    cronies[i].getRoundChart(DetailLevel.currenttype);
-	}
-
+	// this PivotChart is for display
 	thePivotChart = new PivotChart(this, width, height);
-	for (int i = 0; i < cronies.Count; i++)
-	{
-	    if (cronies[i].wasDeletedDontBother) continue;
-	    try {
-		if (cronies[i].ratio() > 0) thePivotChart.addCollectedPoints(cronies[i], AccessType.read, i);
-		if (cronies[i].ratio() < 100) thePivotChart.addCollectedPoints(cronies[i], AccessType.write, i);
+
+	for (int i = 0; i < rounds.Count; i++) {
+	    if (rounds[i].wasDeletedDontBother) continue;
+
+	    if (rounds[i].ratio() > 0) {
+		thePivotChart.addSeries(rounds[i], AccessType.read, i);
 	    }
-	    catch (NullReferenceException x) {
-		MB.S("initPivotChart(" + width + ", " + height +
-		"): Null reference exception.\n(thePivotChart == null) == " +
-		(thePivotChart == null).ToString() + "\n(cronies[" + i +
-		"] == null) == " + (cronies[i] == null).ToString() +
-		"\n" + x.ToString());
+	    if (rounds[i].ratio() < 100) {
+		thePivotChart.addSeries(rounds[i], AccessType.write, i);
 	    }
 	}
-	thePivotChart.updateHoverSeries(null);
-	setFull(b.Checked);
+
+	thePivotChart.createHoverSeries();
+
+	//setFull(full_checkbox.Checked);
+	setFull(true);
+
 	chartReady = (thePivotChart.currentChart != null);
 	if (!chartReady) {
 	    MB.S("initPivotChart(" + width + ", " 
@@ -2255,6 +2326,53 @@ public class BenchChart
 	return thePivotChart.currentChart;
     }
 
+    /*
+     * called by PmGraph.graphManual()
+     */
+    public Chart getNewChart(int w, int h)
+    {
+	if (chartReady) MB.S("getNewChart: Error: chartReady is true");
+	
+	return initializePivotChart(w, h);
+    }
+
+    /*
+     * called by PmGraph.updateChart() <- not being used actively..
+     */
+    public Chart getPreparedChart()
+    {
+	if (!chartReady) MB.S("getPreparedChart: Error: chartReady is false");
+
+	return thePivotChart.getChart(DetailLevel.currenttype);
+    }
+
+    /*
+     * called by PmGraph.graphManual()
+     */
+    public void destroyPivotChart()
+    {
+	if (thePivotChart == null) {
+Console.WriteLine("destroyPivotChart() - already null");
+	    return;
+	}
+
+	if (chartReady) {
+	    if (thePivotChart.currentChart == null) {
+		MB.S("destroyPovitChart: Chart already destroyed");
+		return;
+	    }
+	    thePivotChart.currentChart.Dispose();
+	    thePivotChart.currentChart = null;
+	    chartReady = false;
+Console.WriteLine("destroyPivotChart() pivot chart disposed");
+	} else {
+	    MB.S("destroyPivotChart info: Chart is not ready");
+	}
+    }
+
+    /*
+     * called when export CSV button clicked
+     */
     public int dumpPivotCsv(string folder)
     {
 	return CsvWriter.writePivotCsvDump(folder, this, ref this.outfile);
@@ -2265,23 +2383,62 @@ public class BenchChart
 	return thePivotChart.getSelectionCount();
     }
 
-    public void destroyPivotChart()
-    {
-	if (thePivotChart == null) return;
-
-	if (chartReady) {
-	    if (thePivotChart.currentChart == null) {
-		MB.S("destroyPovitChart: Chart already destroyed");
-		return;
-	    }
-	    thePivotChart.currentChart.Dispose();
-	    thePivotChart.currentChart = null;
-	    chartReady = false;
-	} else {
-	    MB.S("destroyPivotChart info: Chart is not ready");
-	}
-    }
-}   // BenchChart
+}   // Harness
 
 
 } // namespace PmGraphSpace
+
+
+
+
+
+
+/* graveyard
+ 
+    // this constructor is used for storage only - should never be displayed
+    public PivotChart(XmlNode node)
+    {
+Console.WriteLine("PivotChart() constructor - storage only");
+	allSeries = new Dictionary<string, BetterSeries>();
+	partnerSeries = new Dictionary<string, BetterSeries>();
+	hoverSeries = null;
+	randomColorState = new Random(int.Parse("0ddfaced", System.Globalization.NumberStyles.HexNumber));
+	flaggedForDeletion = new List<string>();
+	selectionCount = 0;
+
+	for (int i = 0; i < 2; i++) {
+	    Chart chart = new Chart();
+	    ChartArea sumCount = new ChartArea();
+	    // current chart measures individual hex buckets, not sum_count, 
+	    // but I don't feel like changing it
+	    sumCount.Name = "sum_count"; 
+	    sumCount.AxisX.ScaleView.Zoomable = true;
+	    sumCount.AxisY.ScaleView.Zoomable = true;
+	    sumCount.AxisY.Title = "Sample count";
+	    sumCount.AxisX.Title = "Latency interval (2^x ns)";
+	    Legend legend1 = new Legend();
+	    legend1.Name = "Legend1";
+	    chart.ChartAreas.Add(sumCount);
+	    chart.Name = "Statistics";
+	    chart.Legends.Add(legend1);
+	    chart.TabIndex = 1;
+	    chart.Text = (i == 1 ? "hex_bins" : "sum_count");
+	    XmlNode stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
+	    XmlToChart.getHisto(chart, stats, AccessType.read, Color.Blue, i == 1);
+	    XmlToChart.getHisto(chart, stats, AccessType.write, Color.Red, i == 1);
+	    stats = null;
+	    switch (i) {
+	    case (0):
+		miniChart = chart;
+		break;
+	    case (1):
+		fullChart = chart;
+		break;
+	    default:
+		MB.S("new pivot chart from xmlnode error: " + i);
+		break;
+	    }
+	}
+    }
+
+    */

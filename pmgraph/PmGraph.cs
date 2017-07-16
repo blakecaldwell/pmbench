@@ -262,7 +262,7 @@ public class ControlPanel : FlowLayoutPanel
 	importManualSingleButton = initButton("Import", 
 		importSingleBenches_click, true);
 	exportManualButton = initButton("Export", 
-		pmgraph.exportCsvManual, false);
+		pmgraph.exportCsvManual_click, false);
 	averageSelectedButton = initButton("Average selected",
 		pmgraph.averageSelectedButton_click, false);
 	deleteSelectedButton = initButton("Delete seleted",
@@ -318,7 +318,7 @@ public class ControlPanel : FlowLayoutPanel
 
 
 	// old exportButton recovered code
-	exportButtonOld = initButton("Exptld", 
+	exportButtonOld = initButton("Expt old", 
 		pmgraph.exportCsv_click, false);
 	autoExportButton = initButton("Auto export",
 		pmgraph.autoCsvDump_click, false);
@@ -339,7 +339,7 @@ public class ControlPanel : FlowLayoutPanel
 /* JY    initControlRow(new Control[]
 	    {
 		importManualSingleButton = initButton("Import", importSingleBenches_click, true),
-		exportManualButton = initButton("Export", pmgraph.exportCsvManual, false)
+		exportManualButton = initButton("Export", pmgraph.exportCsvManual_click, false)
 	    }, 
 	    220, 
 	    28, 
@@ -533,28 +533,27 @@ public class ControlPanel : FlowLayoutPanel
 
     public int getPivotVariableCount(int i)
     {
-	switch (i)
-	{
-	    case 0:
-		return dropKernel.Items.Count;
-	    case 1:
-		return dropDevice.Items.Count;
-	    case 2:
-		return dropMemory.Items.Count;
-	    case 3:
-		return dropMapsize.Items.Count;
-	    case 4:
-		return dropJobs.Items.Count;
-	    case 5:
-		return dropDelay.Items.Count;
-	    case 6:
-		return dropRatio.Items.Count;
-	    case 7:
-		return 0; // dropNice.Items.Count;
-	    case 8:
-		return 6;
-	    default:
-		return 0;
+	switch (i) {
+	case 0:
+	    return dropKernel.Items.Count;
+	case 1:
+	    return dropDevice.Items.Count;
+	case 2:
+	    return dropMemory.Items.Count;
+	case 3:
+	    return dropMapsize.Items.Count;
+	case 4:
+	    return dropJobs.Items.Count;
+	case 5:
+	    return dropDelay.Items.Count;
+	case 6:
+	    return dropRatio.Items.Count;
+	case 7:
+	    return 0; // dropNice.Items.Count;
+	case 8:
+	    return 6;
+	default:
+	    return 0;
 	}
     }
 
@@ -693,6 +692,7 @@ public class ControlPanel : FlowLayoutPanel
 	);
     }
 
+    public void setControlsEnabled_dummy() {;}
     public void setControlsEnabled(bool t1, bool t2, bool t3)
     {
 	return;
@@ -862,19 +862,19 @@ public class PmGraph : Form
 {
     private Dictionary<string, XmlDocument> xmlFiles;
     private Dictionary<string, BenchSiblings> allBenchSiblings;
-    private Dictionary<string, BenchChart> allBenchCharts;
+    private Dictionary<string, Harness> allHarnesses;
 
     private Panel mainPanel;
     private ControlPanel controlPanel;
-    private Chart theChart;
-    private BenchChart theBenchChart;
+    private Chart theChart;	// hold onto the current Chart object
+    private Harness auto_oldcode;
+    private Harness manual; // ??? what's the difference?
 
     private string[] kernelFilenameStrings = { "Fedora23_native", "Fedora23_Xen", "Windows10_native", "Windows10_Xen" };
     private string[] deviceFilenameStrings = { "chatham", "NANDSSD", "RAMDISK" };
     private int[] physMemValues = { 256, 512, 1024, 2048, 4096, 8192, 16384 };
     private int totalValidated = 0, failedValidation = 0;
 //        private string replaceDir;
-    private BenchChart manualPivot = null;
 
 
     public PmGraph()
@@ -902,7 +902,9 @@ public class PmGraph : Form
 
 	xmlFiles = new Dictionary<string, XmlDocument>();
 	allBenchSiblings = new Dictionary<string, BenchSiblings>();
-	allBenchCharts = new Dictionary<string, BenchChart>();
+	allHarnesses = new Dictionary<string, Harness>();
+
+	manual = new Harness(this);
     }
 
     public void dropSelectionChanged_action(object o, EventArgs args)
@@ -913,7 +915,8 @@ public class PmGraph : Form
     public void showFullChanged_action(object o, EventArgs args)
     {
 	//MB.S("PmGraph.showFullChanged_action: details checkbox is " + (controlPanel.fullCheck.Checked ? "now" : "no longer") + " checked.");
-	theBenchChart.refreshFull(controlPanel.fullCheck);
+
+	auto_oldcode.setFull(controlPanel.fullCheck.Checked);
 	dropSelectionChanged(controlPanel.autoCheck);
     }
 
@@ -1146,7 +1149,7 @@ public class PmGraph : Form
 
     public async void autoCsvDump_click(object sender, EventArgs args) //user clicked the auto export button, iterate and export all possible combinations pivot CSVs
     {
-	removeChart();
+	detachChart();
 	controlPanel.saveTempIndices();
 	controlPanel.setControlsEnabled(false, false, false);
 	controlPanel.autoCheck.Checked = false;
@@ -1218,10 +1221,10 @@ public class PmGraph : Form
 					    //controlPanel.setDropMenuSelected(7, s);
 					    if (getResults(false))
 					    {
-						if (!theBenchChart.dumped && theBenchChart.cronies.Count > 1)
+						if (!auto_oldcode.dumped && auto_oldcode.rounds.Count > 1)
 						{
-						    files += dumpPivotCsv(folderPath);
-						    theBenchChart.dumped = true;
+						    files += auto_oldcode.dumpPivotCsv(folderPath);
+						    auto_oldcode.dumped = true;
 						}
 					    }
 				       // }
@@ -1252,10 +1255,8 @@ public class PmGraph : Form
 
     private XmlNode getBenchSiblingsNodeFromDocAndKey(XmlDocument doc, string key2)
     {
-//            char[] delimiter = { '_' };
-//            string[] key_split = key2.Split(delimiter);
-	try //select the node with the user-provided parameters
-	{
+	//select the node with the user-provided parameters
+	try {
 	    return SafeXmlParse.selNode(doc, controlPanel.getNodeSelectionPathFromKey2(key2));
 	}
 	catch (System.Xml.XPath.XPathException x) {
@@ -1264,22 +1265,22 @@ public class PmGraph : Form
 	}
     }
 
-    private BenchChart makePivot(BenchSiblings bs, int ri)
+    private Harness makeHarness(BenchSiblings bs, int ri)
     {
 	if (controlPanel.radioIndex == 8) {
-	    return new BenchChart(bs.benchParams, ri, bs.Trials, this);
+	    return new Harness(bs.benchParams, ri, bs.Trials, this);
 	} else {
 	    BenchSiblings b;
-	    List<BenchRound> cronies = new List<BenchRound>();
+	    List<BenchRound> brs = new List<BenchRound>();
 	    for (int i = 0; i < controlPanel.getPivotVariableCount(ri); i++)
 	    {
 		b = getBenchSiblingsObjectFromKeyAndKey(controlPanel.makePivotCronyKey1(ri, i), controlPanel.makePivotCronyKey2(ri, i));
 		if (b != null) {
-		    cronies.Add(b.getAverageRound());
+		    brs.Add(b.getAverageRound());
 		}
 	    }
 	    b = null;
-	    return new BenchChart(bs.benchParams, ri, cronies, this);
+	    return new Harness(bs.benchParams, ri, brs, this);
 	}
     }
 
@@ -1301,7 +1302,9 @@ public class PmGraph : Form
 		ParamSet bp = ParamSet.makeParamsFromKeysAndNode(key1, key2, getParamsNodeFromSeriesNode(sn));
 		if (bp == null) return null;
 
-		string[] splat = splitString(key1, '_');
+//		string[] splat = splitString(key1, '_');
+		char[] delimiter = { '_' };
+		string[] splat = key1.Split(delimiter);
 		bp.operatingSystem = controlPanel.getKey1Value(0, int.Parse(splat[0]));
 		bp.swapDevice = controlPanel.getKey1Value(1, int.Parse(splat[1]));
 		bp.valueMemory = int.Parse(controlPanel.getKey1Value(2, int.Parse(splat[2])));
@@ -1314,34 +1317,58 @@ public class PmGraph : Form
 	return bs;
     }
 
-    private BenchChart getBenchChartFromKey(string s)
+    private Harness getHarnessFromKey(string s)
     {
-	BenchChart bchart = null;
 	try {
-	    bchart = allBenchCharts[s];
+	    return allHarnesses[s];
 	}
 	catch (KeyNotFoundException) {
 	    return null;
 	}
-	return bchart;
     }
 
-    private BenchChart getBenchChartFromDropdowns()
+    private Harness getHarnessFromDropdowns()
     {
-	BenchChart bchart = getBenchChartFromKey(controlPanel.getPivotKeys(false));
-	if (bchart == null) {
+	Harness hns = getHarnessFromKey(controlPanel.getPivotKeys(false));
+
+	if (hns == null) {
 	    BenchSiblings bs = getBenchSiblingsObjectFromKeyAndKey(controlPanel.getKey1FromDropdowns(), controlPanel.getKey2FromDropdowns());
 	    if (bs == null) return null;
 
-	    bchart = makePivot(bs, controlPanel.radioIndex);
-	    allBenchCharts[controlPanel.getPivotKeys(false)] = bchart;
+	    hns = makeHarness(bs, controlPanel.radioIndex);
+	    allHarnesses[controlPanel.getPivotKeys(false)] = hns;
 	}
-	return bchart;
+	return hns;
     }
 
-    public void getResults_click(object o, EventArgs args)
+    private void updateChart()
     {
-	getResults(true);
+Console.WriteLine("updateChart called");
+	try {
+	    if (mainPanel.InvokeRequired) return;
+
+	    if (auto_oldcode == null) {
+		MB.S("auto_oldcoe is null!");
+		return;
+	    }
+	    theChart = auto_oldcode.getPreparedChart();
+
+	    theChart.Width = getChartWidth();
+	    theChart.Height = getChartHeight();
+
+	    theChart.Location = new Point(
+		    controlPanel.Width + controlPanel.Margin.Left + 7, 0);
+	    mainPanel.Controls.Add(theChart);
+
+
+	    if (controlPanel.manualCheck.Enabled == false) {
+		controlPanel.exportButtonOld.Enabled = true;
+	    }
+	}
+	catch (NullReferenceException x) {
+	    MB.S("null reference:"+x.ToString());
+	    return;
+	}
     }
 
     private bool getResults(bool click)
@@ -1356,49 +1383,25 @@ Console.WriteLine("getResults called");
 	    }
 	}
 
-	if (!mainPanel.InvokeRequired) removeChart();
+	if (!mainPanel.InvokeRequired) detachChart();
 
 	if (controlPanel.manualCheck.Checked == false) {
 	    if (getDocFromKey(controlPanel.getKey1FromDropdowns()) == null) { 
 		return false;
 	    }
 	    controlPanel.updateSavedIndices();
-	    theBenchChart = getBenchChartFromDropdowns();
+	    auto_oldcode = getHarnessFromDropdowns();
 	}
-	if (theBenchChart == null) return false;
+	if (auto_oldcode == null) return false;
 
 	updateChart();
 
 	return true;
     }
 
-    private void updateChart()
+    public void getResults_click(object o, EventArgs args)
     {
-Console.WriteLine("updateChart called");
-	try {
-	    if (mainPanel.InvokeRequired) return;
-
-	    if (theBenchChart == null) {
-		MB.S("Bench chart is null!");
-		return;
-	    }
-	    theChart = theBenchChart.getPreparedChart(
-		    getChartWidth(), 
-		    getChartHeight(), 
-		    controlPanel.fullCheck);
-	    theChart.Location = new Point(
-		    controlPanel.Width + controlPanel.Margin.Left + 17,
-		    11);
-	    mainPanel.Controls.Add(theChart);
-
-	    if (controlPanel.manualCheck.Enabled == false) {
-		controlPanel.exportButtonOld.Enabled = true;
-	    }
-	}
-	catch (NullReferenceException x) {
-	    MB.S("null reference:"+x.ToString());
-	    return;
-	}
+	getResults(true);
     }
 
     private void resize_event(object sender, EventArgs args)
@@ -1422,40 +1425,36 @@ Console.WriteLine("updateChart called");
 
     private int getChartHeight()
     {
-	return mainPanel.Height - 11;
+	return mainPanel.Height;
     }
 
-    private bool removeChart()
+    private bool detachChart()
     {
-Console.WriteLine("removeChart called");
-	if (mainPanel == null) return false;
-	
-	if (mainPanel.InvokeRequired) {
-	    MB.S("Illegal cross-thread chart removal attempted");
-	    return false;
-	}
 	if (mainPanel.Controls.Contains(theChart)) {
 	    mainPanel.Controls.Remove(theChart);
 	    theChart = null;
+Console.WriteLine("detachChart() theChart removed");
 	    return true;
 	}
+Console.WriteLine("detachChart() theChart wasn't contained");
 	return false;
+    }
+
+    private void attachChart(Chart newchart)
+    {
+	newchart.Location = new Point(controlPanel.Width + controlPanel.Margin.Left + 7, 0);
+	mainPanel.Controls.Add(newchart);
+	theChart = newchart;
+
+Console.WriteLine("attachChart()");
     }
 
     public void exportCsv_click(object sender, EventArgs args)
     {
-	if (getResults(false)) dumpPivotCsv(null); 
-    }
-
-    private int dumpPivotCsv(string path)
-    {
-	return theBenchChart.dumpPivotCsv(path);
-    } //make sure to check getResults when calling this or theBenchChart may be null
-
-    private static string[] splitString(string s, char c)
-    {
-	char[] delimiter = { c };
-	return s.Split(delimiter);
+	// checking getResults - auto_oldcode may be null.
+	if (getResults(false)) {
+	    auto_oldcode.dumpPivotCsv(null);
+	}
     }
 
     public static XmlNode getParamsNodeFromSeriesNode(XmlNode node)
@@ -1494,7 +1493,8 @@ Console.WriteLine("removeChart called");
     }
 
 
-    private string registerXmlDocName(string s, XmlDocument doc, bool allowrename)
+    // returns docname
+    private string registerXmlDocName(string s, XmlDocument doc)
     {
 	int trynum = 0;
 	string t = s;
@@ -1504,8 +1504,8 @@ Console.WriteLine("removeChart called");
 		xmlFiles.Add(t, doc);
 		break;
 	    }
-	    catch (ArgumentException) {
-		if (allowrename) t = s + trynum++;
+	    catch (ArgumentException) {	// name collision
+		t = s + trynum++;
 	    }
 	}
 	return t;
@@ -1523,68 +1523,50 @@ Console.WriteLine("removeChart called");
 	}
     }
 
-    public void graphManual()
+    /*
+     * this basically remove/recreate/reattach chart.. quite heavy
+     */
+    private void graphManual()
     {
 Console.WriteLine("graphManual entered");
-	if (manualPivot == null) {
-	    MB.S("manual pivot is null, returning");
-	    return;
-	}
 
-	removeChart();
-	if (manualPivot == null) {
-	    MB.S("graphManual: manualPivot is null after removeChart().");
-	}
+	// detach
+	detachChart();
 
-	if (mainPanel.Controls.Contains(theChart)) {
-	    MB.S("graphManual: redundant flowpanel chart removal error");
-	}
+	// dispose
+	manual.destroyPivotChart(); //forgot why this is necessary
 
-	manualPivot.destroyPivotChart(); //forgot why this is necessary
-
-	theChart = manualPivot.getPreparedChart(
+	// recreate chart
+	Chart newchart = manual.getNewChart(
 		getChartWidth(),
-		getChartHeight(),
-		controlPanel.fullCheck);
+		getChartHeight());
 
-	if (theChart == null) {
-	    MB.S("graphManual: chart was assigned as null.");
-	}
+	if (newchart == null) MB.S("graphManual: null chart returned");
 
-	try {
-	    theChart.Location = new Point(controlPanel.Width + controlPanel.Margin.Left + 17, 11);
-	    mainPanel.Controls.Add(theChart);
-	    theBenchChart = manualPivot;
-	    controlPanel.setControlsEnabled(false, false, true);
-	}
-	catch (NullReferenceException x) {
-	    MB.S("PmGraph.graphManual: Null reference exception.\n"
-		    + "theChart is " + (theChart == null ? "INDEED" : "NOT")
-		    + " null.\n" + x.ToString());
-	}
+	// reattach
+	attachChart(newchart);
+
+	// what are these?
+	auto_oldcode = manual;
+	controlPanel.setControlsEnabled_dummy();
     }
 
-    public void addSeriesAverageToManualPivot(BenchSiblings addme)
+    private void addSeriesAverageToManual(BenchSiblings addme)
     {
-	if (manualPivot == null) {
-	    List<BenchRound> br = new List<BenchRound>();
-	    br.Add(addme.averageRound);
-	    manualPivot = new BenchChart(addme.benchParams, 9, br, this);
-	} else {
-	    manualPivot.cronies.Add(addme.averageRound);
+	//XXX fix this ugly conditional for baseParam
+	if (manual.baseParams == null) {
+	    manual.baseParams = addme.benchParams;
 	}
-
-Console.WriteLine("addSeriesAverageToManualPivot");
-	graphManual();
+	manual.rounds.Add(addme.averageRound);
+Console.WriteLine("addSeriesAverageToManual");
     }
 
     /*
-     * called when import dialog is OKed
+     * called when import dialog is OKed. Called by controlPanel
      */
     public void importSingle(string[] filenames)
     {
-	//for (int i = 0; i < filenames.Length; i++)
-	foreach (string fname in filenames)
+	foreach (string fpath in filenames)
 	{
 	    XmlDocument doc = new XmlDocument();
 	    XmlNode fakeSeries = doc.CreateNode(XmlNodeType.Element,
@@ -1592,8 +1574,9 @@ Console.WriteLine("addSeriesAverageToManualPivot");
 	    doc.AppendChild(fakeSeries);
 
 	    ParamSet ps = new ParamSet();
+
 	    XmlDocument tempdoc = new XmlDocument();
-	    tempdoc.Load(fname);
+	    tempdoc.Load(fpath);
 	    XmlNode fakeRound = doc.CreateNode(XmlNodeType.Element,
 		    "test_round", doc.NamespaceURI);
 
@@ -1609,33 +1592,37 @@ Console.WriteLine("addSeriesAverageToManualPivot");
 		    "pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
 
 	    BenchSiblings bs = new BenchSiblings(fakeSeries, doc, ps);
-	    string[] splat1 = splitString(fname, '\\');
-	    string[] splat2 = splitString(splat1[splat1.Length - 1], '.');
-	    bs.averageRound.customName = registerXmlDocName(splat2[0], doc, true);
+	    string fname = Path.GetFileNameWithoutExtension(fpath);
+	    bs.averageRound.customName = registerXmlDocName(fname, doc);
 
-Console.WriteLine("importSingle():" + fname);
-	    addSeriesAverageToManualPivot(bs);
+Console.WriteLine("importSingle():" + fpath); 
+	    addSeriesAverageToManual(bs);
 	}
+	graphManual();
     }
 
     private int averageCounter = 0;
     public void averageSelectedButton_click(object sender, EventArgs e)
     {
-	BenchSiblings bs = theBenchChart.averageSelected(averageCounter++);
+	//BenchSiblings bs = auto_oldcode.averageSelected(averageCounter++);
+	BenchSiblings bs = manual.averageSelected(averageCounter++);
 Console.WriteLine("averageSelectedButton_click");
-	addSeriesAverageToManualPivot(bs);
+	addSeriesAverageToManual(bs);
+
+	graphManual(); // should this be just refresh?
+	//theChart.Refresh(); 
     }
 
     private bool nag = true;
     public void deleteSelectedButton_click(object sender, EventArgs e)
     {
-	theBenchChart.markDeleteSelected(nag);
-	theBenchChart.deleteSelected(nag);
+	auto_oldcode.markDeleteSelected(nag);
+	auto_oldcode.deleteSelected(nag);
     }
 
-    public void exportCsvManual(object sender, EventArgs e)
+    public void exportCsvManual_click(object sender, EventArgs e)
     {
-	manualPivot.dumpPivotCsv(null);
+	manual.dumpPivotCsv(null);
     }
 
     public void updateSelectionButtons(int i)
@@ -1646,26 +1633,25 @@ Console.WriteLine("averageSelectedButton_click");
 
     public bool doesPivotHaveSelections()
     {
-	return (theBenchChart == null ? false : theBenchChart.getChartSelectionCount() > 0);
+	//return (auto_oldcode == null ? false : auto_oldcode.getChartSelectionCount() > 0);
+	if (manual == null) return false;
+	else return (manual.getChartSelectionCount() > 0);
     }
-
-    /*public string setFieldText(string s)
-    {
-	if (s == null) controlPanel.nameAveragesField.Text = "";
-	else controlPanel.nameAveragesField.Text += s;
-	return controlPanel.nameAveragesField.Text;
-    }*/
 
     public void selectAll_click(object sender, EventArgs e)
     {
-	if (theBenchChart == null) return;
+	if (manual == null) return;
 
-	theBenchChart.selectAll();
+	manual.selectAll();
     }
 }
 
 
+
+
+
 } // namespace PmGraphSpace
+
 //delete single on right click context menu
 
 
@@ -1682,6 +1668,21 @@ Console.WriteLine("averageSelectedButton_click");
 	    return;
 	}
 Console.WriteLine("getAverageRoundForManualPivot");
-	addSeriesAverageToManualPivot(bs);
+	addSeriesAverageToManual(bs);
+	graphManual();
     }
+
+    private static string[] splitString(string s, char c)
+    {
+	char[] delimiter = { c };
+	return s.Split(delimiter);
+    }
+
+
 */
+    /*public string setFieldText(string s)
+    {
+	if (s == null) controlPanel.nameAveragesField.Text = "";
+	else controlPanel.nameAveragesField.Text += s;
+	return controlPanel.nameAveragesField.Text;
+    }*/

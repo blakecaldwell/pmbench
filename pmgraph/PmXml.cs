@@ -39,12 +39,12 @@ using System.Xml;
 namespace PmGraphNS
 {
 
-public enum AccessType { uninitialized = -1, read = 0, write = 1 }
-public enum DetailLevel { uninitialized = -1, minitype = 0, fulltype = 1, currenttype = 2 }
+public enum Access { uninitialized = -1, read = 0, write = 1 }
+public enum DetailLevel { uninitialized = -1, mini = 0, full = 1, currenttype = 2 }
 
 public static class SafeXmlParse
 {
-    //public static XmlNode safeSelectSingleNode(XmlNode where, string xpath)
+    // oldname: safeSelectSingleNode(XmlNode where, string xpath)
     public static XmlNode selNode(XmlNode where, string xpath)
     {
 	try { 
@@ -58,21 +58,9 @@ public static class SafeXmlParse
 	    MB.S("node selection null reference exception:\n" + x.ToString());
 	    return null;
 	}
-	catch (OutOfMemoryException x) {
-	    MB.S("Out of memory. " + x.ToString() + "You should probably just quit.");
-	    GC.WaitForPendingFinalizers();
-	    GC.Collect();
-	    GC.RegisterForFullGCNotification(10, 10);
-	    //some kind of notification here
-	    while (true) {
-		if (GC.WaitForFullGCComplete() == GCNotificationStatus.Succeeded) break;
-		Thread.Sleep(500);
-	    }
-	    return selNode(where, xpath);
-	}
     }
 
-    //public static long safeParseSingleNodeLong(XmlNode where, string xpath)
+    // oldname: safeParseSingleNodeLong(XmlNode where, string xpath)
     public static long toLong(XmlNode where, string xpath)
     {
 	if (where == null) {
@@ -81,8 +69,7 @@ public static class SafeXmlParse
 	}
 	long i = 0;
 
-	try
-	{
+	try {
 	    if (selNode(where, xpath) == null) {
 		MB.S("(toLong) xpath " + xpath + " returned a null reference");
 	    }
@@ -97,7 +84,7 @@ public static class SafeXmlParse
 	return i;
     }
 
-    //public static int safeParseSingleNodeInt(XmlNode where, string xpath) //atoi(node.selectSingleNode(xpath)), with exception handling
+    //oldname safeParseSingleNodeInt(XmlNode where, string xpath) 
     public static int toInt(XmlNode where, string xpath) 
     {
 	if (where == null) {
@@ -124,7 +111,7 @@ public static class SafeXmlParse
 	return i;
     }
 
-    //public static double safeParseSingleNodeDouble(XmlNode where, string xpath)
+    //oldname: safeParseSingleNodeDouble(XmlNode where, string xpath)
     public static double toDouble(XmlNode where, string xpath)
     {
 	if (selNode(where, xpath) == null) {
@@ -140,72 +127,50 @@ public static class SafeXmlParse
 	    MB.S("toDouble: (XmlNode, " + xpath + ") Null reference exception:\n" + x.ToString());
 	    return 0;
 	}
-	catch (OutOfMemoryException) {
-	    return toDouble(where, xpath);
-	}
     }
 }   // SafeXmlParse
 
 
 public class BenchRound
 {
-    //private XmlHierarchy hierarchy;
     public XmlNode roundNode; //XML node containing the trial in question, should be of type test_round
     public BenchSiblings seriesObject; //series (with identical params) this round belongs to
 
-    //public PivotChart myPivotChart; //chart with histograms for transcription
-    public MasterDataChart myDataChart; //chart with histograms for transcription
+    public PlotPoints plotPoints; // caching histograms data
 
-    public int trialNum; //which trial number among its series
-    //private bool hasSumCounts; //does the node have a hit counts sum node for latencies <= 2^8 ns? Temporary fix no longer needed
     public bool dirtyDelta; //some windows result files have impossibly large memory values from (fixed) output of negatives as unsigned
     public string customName;
-    private bool readDeleteFlag { get; set; }
-    private bool writeDeleteFlag { get;  set; }
-    public bool killMeFlag { get; set; }
     public bool flaggedForAverage { get; set; }
-    public bool hasPendingDeletions { get; set; }
+
     public bool hasReadSeries { get; set; }
     public bool hasWriteSeries { get; set; }
-//        private string readSeriesName, writeSeriesName;
+
+    public bool hasPendingDeletions { get; set; }
+    private bool readDeleteFlag { get; set; }
+    private bool writeDeleteFlag { get;  set; }
+
     public string readSeriesName, writeSeriesName;
     public bool wasDeletedDontBother;
 
-    public bool setDeletionFlag(AccessType type)
+    public bool setDeletionFlag(Access type)
     {
 	switch (type) {
-	case (AccessType.read):
-	    if (hasReadSeries) return hasPendingDeletions = readDeleteFlag = true;
-	    break;
-	case (AccessType.write):
-	    if (hasWriteSeries) return hasPendingDeletions = writeDeleteFlag = true;
-	    break;
-	default:
-	    MB.S("BenchRound.setDeletionFlag error");
-	    break;
-	}
-	return false;
-    }
-
-    public bool unsetDeletionFlag(AccessType type)
-    {
-	if (hasPendingDeletions) {
-	    switch (type) {
-	    case (AccessType.read):
-		if (hasReadSeries) readDeleteFlag = false;
-		break;
-	    case (AccessType.write):
-		if (hasReadSeries) writeDeleteFlag = false;
-		break;
-	    default:
-		MB.S("BenchRound.unsetDeletionFlag access type error");
+	case (Access.read):
+	    if (hasReadSeries) {
+		hasPendingDeletions = readDeleteFlag = true;
 		return true;
 	    }
-
-	    return (hasPendingDeletions = (readDeleteFlag | writeDeleteFlag));
+	    break;
+	case (Access.write):
+	    if (hasWriteSeries) {
+		hasPendingDeletions = writeDeleteFlag = true;
+		return true;
+	    }
+	    break;
+	default:
+	    MB.S("BenchRound.setDeletionFlag bad access type");
+	    break;
 	}
-
-	MB.S("BenchRound.unsetDeletionFlag pending deletion flag error");
 	return false;
     }
 
@@ -213,10 +178,9 @@ public class BenchRound
     {
 	roundNode = null;
 	seriesObject = null;
-	myDataChart = null;
+	plotPoints = null;
 	readDeleteFlag = false;
 	writeDeleteFlag = false;
-	killMeFlag = false;
 	readSeriesName = null;
 	writeSeriesName = null;
 	flaggedForAverage = false;
@@ -226,11 +190,10 @@ public class BenchRound
 	hasWriteSeries = false;
     }
 
-    public BenchRound(BenchSiblings bs, XmlNode node, int i)
+    public BenchRound(BenchSiblings bench, XmlNode node, int i)
     {
 	roundNode = node;
-	seriesObject = bs;
-	trialNum = i;
+	seriesObject = bench;
     }
 
     public int jobs() { return seriesObject.benchParams.valueJobs; }
@@ -272,35 +235,46 @@ public class BenchRound
     */
 
     /*
+     * create cache of plot points filled with data from xml
      */
-    public void populateDataChart()
+    public void populatePlotPoints()
     {
-	if (myDataChart == null) {
-Console.WriteLine("populateDataChart: creating new MasterDataChart");
-	    myDataChart = new MasterDataChart(roundNode);
+	if (plotPoints == null) {
+	    plotPoints = new PlotPoints(roundNode);
 	}
     }
 
     /*
-     * get the Chart object that holds Points data.
-     * (old name: getRoundChart())
+     * copy cached series points to chart's Series object
      */
-    public Chart getDataChart(DetailLevel detail)
+    public void copyDataPointsTo(Series to, DetailLevel detail, Access type)
     {
-	return myDataChart.getDataChart(detail);
+	// copying data points 
+	// this produces Chart of masterdatachart of benchround..
+	Series from = plotPoints.getSeries(detail, type);
+	DataPoint[] dp = new DataPoint[from.Points.Count];
+
+	// copy points data from Series to dp array starting at idx 0: 
+	from.Points.CopyTo(dp, 0);
+	// now insert the points to new series one by one
+	for (int j = 0; j < dp.Length; j++) {
+	    to.Points.Insert(j, dp[j]);
+	}
     }
+
     
-    public void registerSeriesName(string s, AccessType t)
+    public void registerSeriesName(string s, Access t)
     {
 	if (s == null) return;
+
 	switch (t) {
-	case (AccessType.read):
+	case (Access.read):
 	    if (!hasReadSeries) {
 		readSeriesName = s;
 		hasReadSeries = true;
 	    }
 	    break;
-	case (AccessType.write):
+	case (Access.write):
 	    if (!hasWriteSeries) {
 		writeSeriesName = s;
 		hasWriteSeries = true;
@@ -319,8 +293,7 @@ Console.WriteLine("populateDataChart: creating new MasterDataChart");
 	    totalSamples = 0;
 	    XmlNodeList samplecounts = this.roundNode.SelectNodes("pmbenchmark/report/result/result_thread/result_details/details_samples");
 
-	    for (int i = 0; i < samplecounts.Count; i++)
-	    {
+	    for (int i = 0; i < samplecounts.Count; i++) {
 		totalSamples += double.Parse(samplecounts[i].InnerText);
 	    }
 	}
@@ -331,23 +304,23 @@ Console.WriteLine("populateDataChart: creating new MasterDataChart");
     {
 	int deleted = 0;
 
-	if (!hasPendingDeletions) return 0;
-
-	Chart miniChart = myDataChart.getDataChart(DetailLevel.minitype);
-	Chart fullChart = myDataChart.getDataChart(DetailLevel.fulltype);
+	Series mini_rd = plotPoints.getSeries(DetailLevel.mini, Access.read);
+	Series mini_wr = plotPoints.getSeries(DetailLevel.mini, Access.write);
+	Series full_rd = plotPoints.getSeries(DetailLevel.full, Access.read);
+	Series full_wr = plotPoints.getSeries(DetailLevel.full, Access.write);
 
 	if (readDeleteFlag) {
 	    if (hasReadSeries) {
-		miniChart.Series.Remove(miniChart.Series.FindByName("read"));
-		fullChart.Series.Remove(fullChart.Series.FindByName("read"));
+		mini_rd.Dispose();
+		full_rd.Dispose();
 		hasReadSeries = false;
 		deleted += 1;
 	    }
 	}
 	if (writeDeleteFlag) {
 	    if (hasWriteSeries) {
-		miniChart.Series.Remove(miniChart.Series.FindByName("write"));
-		fullChart.Series.Remove(fullChart.Series.FindByName("write"));
+		mini_wr.Dispose();
+		full_wr.Dispose();
 		hasWriteSeries = false;
 		deleted += 1;
 	    }
@@ -357,7 +330,7 @@ Console.WriteLine("populateDataChart: creating new MasterDataChart");
 	    wasDeletedDontBother = true;
 	    return deleted;
 	} else {
-	    MB.S("BenchRound.deleteSelected error");
+	    MB.S("deleteSelectedSeries: called but none deleted??");
 	    return 0;
 	}
     }
@@ -410,21 +383,18 @@ public class BenchSiblings
 	readSpikeHexVal = 0;
 	writeSpikeHexVal = 0;
 
-	for (int i = 0; i < readbuckets.Count; i++)
-	{
+	for (int i = 0; i < readbuckets.Count; i++) {
 	    double tempSpike = SafeXmlParse.toDouble(readbuckets[i], "sum_count");
-	    if (tempSpike > readSpike)
-	    {
+	    if (tempSpike > readSpike) {
 		readSpike = tempSpike;
 		readSpikeIntervalHi = SafeXmlParse.toInt(readbuckets[i], "bucket_interval/interval_hi");
 	    }
-	    if (readbuckets[i].Attributes.Item(0).Name.Equals("index") && !readbuckets[i].Attributes.Item(0).Value.Equals("0"))
-	    {
-		for (int j = 0; j < 16; j++)
-		{
+
+	    if ( readbuckets[i].Attributes.Item(0).Name.Equals("index") 
+		 && !readbuckets[i].Attributes.Item(0).Value.Equals("0")) {
+		for (int j = 0; j < 16; j++) {
 		    double hexbin = SafeXmlParse.toDouble(readbuckets[i], "bucket_hexes/hex[@index='" + j + "']");
-		    if (hexbin > readSpikeHexVal)
-		    {
+		    if (hexbin > readSpikeHexVal) {
 			readSpikeHexVal = hexbin;
 			readSpikeHexBinNum = j;
 		    }
@@ -432,18 +402,15 @@ public class BenchSiblings
 	    }
 
 	    tempSpike = SafeXmlParse.toDouble(writebuckets[i], "sum_count");
-	    if (tempSpike > writeSpike)
-	    {
+	    if (tempSpike > writeSpike) {
 		writeSpike = tempSpike;
 		writeSpikeIntervalHi = SafeXmlParse.toInt(writebuckets[i], "bucket_interval/interval_hi");
 	    }
-	    if (writebuckets[i].Attributes.Item(0).Name.Equals("index") && !writebuckets[i].Attributes.Item(0).Value.Equals("0"))
-	    {
-		for (int j = 0; j < 16; j++)
-		{
+	    if (writebuckets[i].Attributes.Item(0).Name.Equals("index") 
+		&& !writebuckets[i].Attributes.Item(0).Value.Equals("0")) {
+		for (int j = 0; j < 16; j++) {
 		    double hexbin = SafeXmlParse.toDouble(writebuckets[i], "bucket_hexes/hex[@index='" + j + "']");
-		    if (hexbin > writeSpikeHexVal)
-		    {
+		    if (hexbin > writeSpikeHexVal) {
 			writeSpikeHexVal = hexbin;
 			writeSpikeHexBinNum = j;
 		    }
@@ -455,8 +422,7 @@ public class BenchSiblings
 	XmlNodeList samples = averageNode.SelectNodes("pmbenchmark/report/result/result_thread/result_details/details_samples");
 	samplesPerThread = 0;
 	netAverageLatency = 0;
-	for (int i = 0; i < netavgs.Count; i++)
-	{
+	for (int i = 0; i < netavgs.Count; i++) {
 	    netAverageLatency += double.Parse(netavgs[i].InnerText.ToString());
 	    samplesPerThread += double.Parse(samples[i].InnerText.ToString());
 	}
@@ -581,7 +547,8 @@ public class BenchSiblings
 	    SafeXmlParse.selNode(item_avg, s).InnerText = t.ToString();
 	}
 	catch (NullReferenceException x) {
-	    MB.S("(addMemItemField) Adding field " + s + " for round " + i + ":\n" + x.ToString());
+	    MB.S("addMemItemField: Adding field " + s + 
+		    " for round " + i + ":\n" + x.ToString());
 	}
     }
 
@@ -704,10 +671,13 @@ public class BenchSiblings
 	return true;
     }
 
-    private static void addMemItemsLinux(XmlNode item_avg, XmlNode item_, int i, int trials)
+    private static void addMemItemsLinux(
+	    XmlNode item_avg, 
+	    XmlNode item_, 
+	    int i, 
+	    int trials)
     {
-	try
-	{
+	try {
 	    addMemItemField(item_avg, item_, i, "free_kib", trials);
 	    addMemItemField(item_avg, item_, i, "buffer_kib", trials);
 	    addMemItemField(item_avg, item_, i, "cache_kib", trials);
@@ -772,7 +742,7 @@ public class BenchSiblings
 	    MB.S("makeAverageNode: unable to retrieve ratio parameter:" + x.ToString());
 	    return null; 
 	}
-cold += 0; // JY suppress unused variable warning
+cold += 0; //  suppress unused variable warning
 	XmlNode avg = partialCloneBenchmark(trialsPerSeries);
 	seriesNode.AppendChild(avg);
 
@@ -912,8 +882,8 @@ public class ParamSet
 	char[] delimiter = { '_' };
 	string[] key_split = key2.Split(delimiter);
 
-	try //select the node with the user-provided parameters
-	{
+	//select the node with the user-provided parameters
+	try {
 	    this.valueMapsize = mapSizeValues[int.Parse(key_split[0])];
 	    this.valueJobs = jobsValues[int.Parse(key_split[1])];
 	    this.valueDelay = delayValues[int.Parse(key_split[2])];
@@ -957,39 +927,46 @@ public class ParamSet
 //
 //
 //////////
-public static class CsvWriter
+public class CsvWriter
 {
-    private static string[] meminfos_headers = { "Pre-warmup", "Pre-run", "Mid-run", "Post-run", "Post-unmap" };
-    private static string memitems_headers_linux = "Free KiB,Buffer KiB,Cache KiB,Active KiB,Inactive KiB,Page in/s,Page out/s,Swap in/s,Swap out/s,Major faults\n";
-    private static string memitems_headers_windows = "AvailPhys,dwMemoryLoad,TotalPageFile,AvailPageFile,AvailVirtual\n";
-    private static string results_headers = "Thread #,Net avg. (us),Net avg. (clk),Latency (us),Latency (clk),Samples,Overhead (us),Overhead (clk)\n"; //,Total\n";
-    private static string params_headers = "OS/kernel,Swap device,Phys. memory,Map size,Jobs,Delay,Read/write ratio,Niceness\n";
+    private StreamWriter outfile;
 
-    private static void writePivotCsvSignature(int term, Harness hn)
+    private static string[] meminfos_headers = {
+	"Pre-warmup", "Pre-run", "Mid-run", "Post-run", "Post-unmap" };
+    private static string memitems_headers_linux = 
+	"Free KiB,Buffer KiB,Cache KiB,Active KiB,Inactive KiB,Page in/s,Page out/s,Swap in/s,Swap out/s,Major faults\n";
+    private static string memitems_headers_windows = 
+	"AvailPhys,dwMemoryLoad,TotalPageFile,AvailPageFile,AvailVirtual\n";
+    private static string results_headers = 
+	"Thread #,Net avg. (us),Net avg. (clk),Latency (us),Latency (clk),Samples,Overhead (us),Overhead (clk)\n"; //,Total\n";
+    private static string params_headers = 
+	"OS/kernel,Swap device,Phys. memory,Map size,Jobs,Delay,Read/write ratio,Niceness\n";
+
+    private void writePivotCsvSignature(int term, Harness hn)
     {
 	string div1 = ",", div2 = "*";
 
 	switch (term) {
 	case (0):
-	    hn.outfile.Write((hn.pivotIndex == 0 ? div2 : hn.baseParams.operatingSystem) + div1);
+	    outfile.Write((hn.pivotIndex == 0 ? div2 : hn.baseParams.operatingSystem) + div1);
 	    break;
 	case (1):
-	    hn.outfile.Write((hn.pivotIndex == 1 ? div2 : hn.baseParams.swapDevice) + div1);
+	    outfile.Write((hn.pivotIndex == 1 ? div2 : hn.baseParams.swapDevice) + div1);
 	    break;
 	case (2):
-	    hn.outfile.Write((hn.pivotIndex == 2 ? div2 : hn.baseParams.valueMemory.ToString() + "MiB") + div1);
+	    outfile.Write((hn.pivotIndex == 2 ? div2 : hn.baseParams.valueMemory.ToString() + "MiB") + div1);
 	    break;
 	case (3):
-	    hn.outfile.Write((hn.pivotIndex == 3 ? div2 : hn.baseParams.valueMapsize.ToString() + "MiB") + div1);
+	    outfile.Write((hn.pivotIndex == 3 ? div2 : hn.baseParams.valueMapsize.ToString() + "MiB") + div1);
 	    break;
 	case (4):
-	    hn.outfile.Write((hn.pivotIndex == 4 ? div2 : hn.baseParams.valueJobs.ToString()) + div1);
+	    outfile.Write((hn.pivotIndex == 4 ? div2 : hn.baseParams.valueJobs.ToString()) + div1);
 	    break;
 	case (5):
-	    hn.outfile.Write((hn.pivotIndex == 5 ? div2 : hn.baseParams.valueDelay.ToString()) + div1);
+	    outfile.Write((hn.pivotIndex == 5 ? div2 : hn.baseParams.valueDelay.ToString()) + div1);
 	    break;
 	case (6):
-	    hn.outfile.Write((hn.pivotIndex == 6 ? div2 : hn.baseParams.valueRatio.ToString()) + div1);
+	    outfile.Write((hn.pivotIndex == 6 ? div2 : hn.baseParams.valueRatio.ToString()) + div1);
 	    break;
 	/*case (7):
 	    outfile.Write((pivotIndex == 7 ? div2 : baseParams.valueNice.ToString()));
@@ -999,50 +976,157 @@ public static class CsvWriter
 	}
     }
 
-    public static string getPivotDumpHeader(int i, Harness hn) //i = round #
+    private void writeMemInfoLinux(XmlNode info)
     {
-	if (hn.pivotIndex == 8) {
-	    return (i == 5 ? "Average" : "Trial " + (i + 1));
-	}
-	switch (hn.pivotIndex) {
-	case (0):   //OS/Kernel
-	    return hn.rounds[i].operatingSystem();
-	case (1):   //Device
-	    return hn.rounds[i].swapDevice();
-	case (2):   //Phys. memory
-	    return (hn.rounds[i].valueMemory().ToString() + " memory");
-	case (3):   //Map size
-	    return (hn.rounds[i].valueMapsize().ToString() + " map");
-	case (4):   //Jobs
-	    return hn.rounds[i].jobs().ToString();
-	case (5):   //Delay
-	    switch (int.Parse(hn.rounds[i].valueDelay().ToString())) {
-	    case (0):
-		return "None";
-	    default:
-		return (hn.rounds[i].valueDelay().ToString() + " clk");
+	outfile.Write
+	(
+	    SafeXmlParse.selNode(info, "free_kib").InnerText + "," +
+	    SafeXmlParse.selNode(info, "buffer_kib").InnerText + "," +
+	    SafeXmlParse.selNode(info, "cache_kib").InnerText + "," +
+	    SafeXmlParse.selNode(info, "active_kib").InnerText + "," +
+	    SafeXmlParse.selNode(info, "inactive_kib").InnerText + "," +
+	    SafeXmlParse.selNode(info, "pgpgin").InnerText + "," +
+	    SafeXmlParse.selNode(info, "pgpgout").InnerText + "," +
+	    SafeXmlParse.selNode(info, "pswpin").InnerText + "," +
+	    SafeXmlParse.selNode(info, "pswpout").InnerText + "," +
+	    SafeXmlParse.selNode(info, "pgmajfault").InnerText + "\n"
+	);
+    }
+
+    private void writeMemInfoWindows(XmlNode info)
+    {
+	outfile.Write
+	(
+	    SafeXmlParse.selNode(info, "AvailPhys").InnerText + "," +
+	    SafeXmlParse.selNode(info, "dwMemoryLoad").InnerText + "," +
+	    SafeXmlParse.selNode(info, "TotalPageFile").InnerText + "," +
+	    SafeXmlParse.selNode(info, "AvailPageFile").InnerText + "," +
+	    SafeXmlParse.selNode(info, "AvailVirtual").InnerText + "\n"
+	);
+    }
+
+    private void writeFullBucket(List<XmlNode> nodes, int i)
+    {
+	//write bucket i of all nodes in order
+	double lo = Math.Pow(2, i + 7);
+	double hi = Math.Pow(2, i + 8);
+	double mid = (hi - lo) / 16;
+	for (int j = 0; j < 16; j++) { //bucket hexes with indexes 0-15
+	    double gap1 = lo + (j * mid);
+	    double gap2 = gap1 + mid;
+	    outfile.Write(gap1 + "," + gap2 + ",");
+	    for (int k = 0; k < nodes.Count; k++) {
+		outfile.Write(SafeXmlParse.toDouble(nodes[k], "histo_bucket[@index='" + i + "']/bucket_hexes/hex[@index='" + j + "']"));
+		if (k == nodes.Count - 1) {
+		    outfile.Write("\n");
+		} else {
+		    outfile.Write(",");
+		}
 	    }
-	case (6):   //Ratio
-	    switch (hn.rounds[i].ratio()) {
-	    case (0):
-		return "Write-only";
-	    case (100):
-		return "Read-only";
-	    default:
-		return (hn.rounds[i].ratio().ToString() + "%");
-	    }
-	case (7):   //Nice
-	    return "0"; // rounds[i].valueNice().ToString();
-	case (9): //stopgap
-	    return hn.rounds[i].customName;
-	default:
-	    return "ERROR getPivotDumpHeader(" + i + ") index " + hn.pivotIndex;
 	}
     }
 
-    public static int writePivotCsvDump(string folder, Harness hn, ref StreamWriter outfile)
+    private void writeSumCounts(XmlNode[] buckets)
     {
+	if (buckets == null) {
+	    MB.S("writeSumCounts error: null buckets");
+	    return;
+	}
+	if (buckets[0] == null) {
+	    MB.S("writeSumCounts error: null first element");
+	    return;
+	}
+	if (buckets[0].Attributes.Count == 0) {
+	    MB.S("writeSumCounts error: zero attributes");
+	    return;
+	}
+	if (!buckets[0].Attributes.Item(0).Name.Equals("index")) {
+	    MB.S("writeSumCounts error: attribute name is " + buckets[0].Attributes.Item(0).Name);
+	    return;
+	}
+	try {
+//            int bucket_index = int.Parse(buckets[0].Attributes.Item(0).Value);
+	    double lo, hi, interval_hi = SafeXmlParse.toInt(buckets[0], "bucket_interval/interval_hi");
+	    double interval_lo = SafeXmlParse.toInt(buckets[0], "bucket_interval/interval_lo");
+	    lo = Math.Pow(2, interval_lo);
+	    hi = Math.Pow(2, interval_hi);
+	    outfile.Write(lo + "," + hi + ",");
+	    for (int j = 0; j < buckets.Length; j++) {
+		outfile.Write(SafeXmlParse.toDouble(buckets[j], "sum_count"));
+		if (j == buckets.Length - 1) {
+		    outfile.Write("\n");
+		} else {
+		    outfile.Write(",");
+		}
+	    }
+	}
+	catch (ArgumentException x) {
+	    MB.S("writeSumCounts ArgumentException:\n" + x.ToString());
+	    return;
+	}
+    }
 
+    private void writePivotHistogramList(List<XmlNode> nodes, bool showFull)
+    {
+	XmlNodeList[] bucket0s = new XmlNodeList[nodes.Count];
+	outfile.Write("0,256,");
+	for (int i = 0; i < nodes.Count; i++) {
+	    if (nodes[i] == null) {
+		MB.S("writeCommaseparatePivotHistogramList: Received null node at position " + i);
+		return;
+	    }
+
+	    //bucket0s[i] contains all of the bucket 0's for round i
+	    bucket0s[i] = nodes[i].SelectNodes("histo_bucket[@index='0']");
+
+	    if ( SafeXmlParse.toInt(bucket0s[i].Item(0),
+			"bucket_interval/interval_lo") 
+		    != 0)
+	    {
+		MB.S("writePivotHistogramList: missing hit_counts_sum on test round " + i + 1);
+	    }
+
+	    outfile.Write(SafeXmlParse.toDouble(bucket0s[i].Item(0), "sum_count"));
+	    if (i == nodes.Count - 1) {
+		outfile.Write("\n");
+	    } else {
+		outfile.Write(",");
+	    }
+	}
+
+	for (int i = 1; i < 16; i++) { //buckets with indexes 1-15
+	    if (showFull) {
+		writeFullBucket(nodes, i);
+	    } else {
+		XmlNode[] buckets = new XmlNode[nodes.Count];
+		for (int k = 0; k < nodes.Count; k++) {
+		    buckets[k] = SafeXmlParse.selNode(nodes[k], "histo_bucket[@index='" + i + "']");
+		}
+		writeSumCounts(buckets);
+	    }
+	}
+	for (int i = 1; i < bucket0s[0].Count; i++) { //skip the first sum_count
+	    try {
+		XmlNode[] bucket0s_high = new XmlNode[nodes.Count];
+		for (int k = 0; k < nodes.Count; k++) {
+		    bucket0s_high[k] = bucket0s[k].Item(i);
+		}
+		writeSumCounts(bucket0s_high);
+	    }
+	    catch (IndexOutOfRangeException x) {
+		MB.S("Index out of range exception at " + i.ToString() + " of " + bucket0s[0].Count + ":\n" + x.ToString());
+	    }
+	}
+	bucket0s = null;
+	outfile.Write("\n");
+    }
+
+    /*
+     * the public entry point
+     * returns 1 if everything is OK, 0 if any error
+     */
+    public int writePivotCsvDump(string folder, Harness hn)
+    {
 	string path = "";
 	bool good = true;
 
@@ -1077,302 +1161,189 @@ public static class CsvWriter
 	    path = folder + "\\" + csvfilename + ".csv";
 	}
 
-	if (good) {
-	    try {
-		outfile = new StreamWriter(path);
-		outfile.Write(params_headers);
-		for (int i = 0; i < 8; i++) {
-		    writePivotCsvSignature(i, hn);
-		}
-		outfile.Write("\n\n");
-		XmlNode report, result;
-		for (int h = 0; h < hn.rounds.Count; h++)
-		{
-		    outfile.Write(getPivotDumpHeader(h, hn) + ",");
-		    outfile.Write(results_headers);
-		    report = SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report");
-		    for (int j = 1; j <= hn.rounds[h].jobs(); j++)
-		    {
-			result = SafeXmlParse.selNode(report, "result/result_thread[@thread_num='" + j + "']");
-			hn.outfile.Write
-			(
-			    " ," + j + "," +
-			    SafeXmlParse.toDouble(result, "result_netavg/netavg_us") + "," +
-			    SafeXmlParse.toDouble(result, "result_netavg/netavg_clk") + "," +
-			    SafeXmlParse.toDouble(result, "result_details/details_latency/latency_us") + "," +
-			    SafeXmlParse.toDouble(result, "result_details/details_latency/latency_clk") + "," +
-			    SafeXmlParse.toDouble(result, "result_details/details_samples") + "," +
-			    SafeXmlParse.toDouble(result, "result_details/details_overhead/overhead_us") + "," +
-			    SafeXmlParse.toDouble(result, "result_details/details_overhead/overhead_clk") + "\n" //"," + 
-			);
-		    }
-		}
-		outfile.Write("\n");
-		report = null;
-		result = null;
+	if (!good) goto out_ret_1;
 
-		List<XmlNode> histos;
-		bool first = true;
-		if (hn.pivotIndex == 6 || hn.baseParams.valueRatio > 0)
-		{
-		    hn.outfile.Write("Read latencies,,");
-		    histos = new List<XmlNode>();
-		    for (int h = 0; h < hn.rounds.Count; h++)
-		    {
-			if (hn.rounds[h].ratio() > 0)
-			{
-			    if (!first) { hn.outfile.Write(","); }
-			    else { first = false; }
-			    hn.outfile.Write(getPivotDumpHeader(h, hn));
-			    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='read']"));
-			}
-		    }
-		    hn.outfile.Write("\n");
-		    //MB.S("Writing histograms for " + histos.Count + " histograms");
-		    writeCommaSeparatePivotHistogramList(histos, hn);
-		    histos.Clear();
-		}
+	try { 
+	    outfile = new StreamWriter(path);
+	}
+	catch (IOException e) {
+	    MessageBox.Show("Error creating file:" + e.ToString());
+	    goto out_ret_0;
+	}
 
-		if (hn.pivotIndex == 6 || hn.baseParams.valueRatio < 100) {
-		    first = true;
-		    hn.outfile.Write("Write latencies,,");
-		    histos = new List<XmlNode>();
-		    for (int h = 0; h < hn.rounds.Count; h++)
-		    {
-			if (hn.rounds[h].ratio() < 100)
-			{
-			    if (!first) hn.outfile.Write(","); 
-			    else first = false;
-			    hn.outfile.Write(getPivotDumpHeader(h, hn));
-			    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='write']"));
-			}
-		    }
-		    hn.outfile.Write("\n");
-		    writeCommaSeparatePivotHistogramList(histos, hn);
-		    histos.Clear();
-		}
-		histos = null;
-
-		for (int m = 0; m < hn.rounds.Count; m++)
-		{
-		    XmlNodeList sys_mem_items = hn.rounds[m].roundNode.SelectNodes("pmbenchmark/report/sys_mem_info/sys_mem_item");
-		    int j = hn.rounds[m].cold();
-		    if (hn.rounds[m].windowsbench())
-		    {
-			hn.outfile.Write(getPivotDumpHeader(m, hn) + "," + memitems_headers_windows);
-			for (int k = 0; k < sys_mem_items.Count; k++)
-			{
-			    hn.outfile.Write(meminfos_headers[k + j] + ",");
-			    XmlNode item = sys_mem_items.Item(k);
-			    writeCommaSeparateMemInfoWindows(SafeXmlParse.selNode(item, "mem_item_info"), hn);
-			    if (!item.Attributes.Item(0).Value.Equals("post-unmap"))
-			    {
-				hn.outfile.Write("Delta,");
-				writeCommaSeparateMemInfoWindows(SafeXmlParse.selNode(item, "mem_item_delta"), hn);
-			    }
-			    item = null;
-			}
-		    } else {
-			hn.outfile.Write(getPivotDumpHeader(m, hn) + "," + memitems_headers_linux);
-			for (int k = 0; k < sys_mem_items.Count; k++)
-			{
-			    hn.outfile.Write(meminfos_headers[k + j] + ",");
-			    XmlNode item = sys_mem_items.Item(k);
-			    writeCommaSeparateMemInfoLinux(SafeXmlParse.selNode(item, "mem_item_info"), hn);
-			    if (!item.Attributes.Item(0).Value.Equals("post-unmap"))
-			    {
-				hn.outfile.Write("Delta,");
-				writeCommaSeparateMemInfoLinux(SafeXmlParse.selNode(item, "mem_item_delta"), hn);
-			    }
-			    item = null;
-			}
-		    }
-		    sys_mem_items = null;
-		}
-		outfile.Flush();
-		outfile.Close();
-
-		if (folder == null) MB.S("Wrote CSV to " + path);
-	    }
-	    catch (IOException x) {
-		MB.S("Error writing file to " + path + "\n" + x.ToString());
-		return 0;
+	outfile.Write(params_headers);
+	for (int i = 0; i < 8; i++) {
+	    writePivotCsvSignature(i, hn);
+	}
+	outfile.Write("\n\n");
+	XmlNode report, result;
+	for (int h = 0; h < hn.rounds.Count; h++) {
+	    outfile.Write(getPivotDumpHeader(h, hn) + ",");
+	    outfile.Write(results_headers);
+	    report = SafeXmlParse.selNode(hn.rounds[h].roundNode,
+		    "pmbenchmark/report");
+	    for (int j = 1; j <= hn.rounds[h].jobs(); j++)
+	    {
+		result = SafeXmlParse.selNode(report, "result/result_thread[@thread_num='" + j + "']");
+		outfile.Write
+		(
+		    " ," + j + "," +
+		    SafeXmlParse.toDouble(result, "result_netavg/netavg_us") + "," +
+		    SafeXmlParse.toDouble(result, "result_netavg/netavg_clk") + "," +
+		    SafeXmlParse.toDouble(result, "result_details/details_latency/latency_us") + "," +
+		    SafeXmlParse.toDouble(result, "result_details/details_latency/latency_clk") + "," +
+		    SafeXmlParse.toDouble(result, "result_details/details_samples") + "," +
+		    SafeXmlParse.toDouble(result, "result_details/details_overhead/overhead_us") + "," +
+		    SafeXmlParse.toDouble(result, "result_details/details_overhead/overhead_clk") + "\n" //"," + 
+		);
 	    }
 	}
-	path = null;
+	outfile.Write("\n");
+	report = null;
+	result = null;
+
+	List<XmlNode> histos;
+	bool first = true;
+	if (hn.pivotIndex == 6 || hn.baseParams.valueRatio > 0) {
+	    outfile.Write("Read latencies,,");
+	    histos = new List<XmlNode>();
+	    for (int h = 0; h < hn.rounds.Count; h++) {
+		if (hn.rounds[h].ratio() > 0) {
+		    if (!first) outfile.Write(",");
+		    else first = false; 
+		    outfile.Write(getPivotDumpHeader(h, hn));
+		    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='read']"));
+		}
+	    }
+	    outfile.Write("\n");
+	    //MB.S("Writing histograms for " + histos.Count + " histograms");
+	    writePivotHistogramList(histos, hn.showFull);
+	    histos.Clear();
+	}
+
+	if (hn.pivotIndex == 6 || hn.baseParams.valueRatio < 100) {
+	    first = true;
+	    outfile.Write("Write latencies,,");
+	    histos = new List<XmlNode>();
+	    for (int h = 0; h < hn.rounds.Count; h++) {
+		if (hn.rounds[h].ratio() < 100) {
+		    if (!first) outfile.Write(","); 
+		    else first = false;
+		    outfile.Write(getPivotDumpHeader(h, hn));
+		    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='write']"));
+		}
+	    }
+	    outfile.Write("\n");
+	    writePivotHistogramList(histos, hn.showFull);
+	    histos.Clear();
+	}
+	histos = null;
+
+	for (int m = 0; m < hn.rounds.Count; m++) {
+	    XmlNodeList sys_mem_items = hn.rounds[m].roundNode.SelectNodes("pmbenchmark/report/sys_mem_info/sys_mem_item");
+	    int j = hn.rounds[m].cold();
+	    if (hn.rounds[m].windowsbench()) {
+		outfile.Write(getPivotDumpHeader(m, hn) + "," + memitems_headers_windows);
+		for (int k = 0; k < sys_mem_items.Count; k++) {
+		    outfile.Write(meminfos_headers[k + j] + ",");
+		    XmlNode item = sys_mem_items.Item(k);
+		    writeMemInfoWindows(
+			    SafeXmlParse.selNode(item, "mem_item_info"));
+		    if (!item.Attributes.Item(0).Value.Equals("post-unmap")) {
+			outfile.Write("Delta,");
+			writeMemInfoWindows(
+				SafeXmlParse.selNode(item, "mem_item_delta"));
+		    }
+		    item = null;
+		}
+	    } else {
+		outfile.Write(getPivotDumpHeader(m, hn) + "," + memitems_headers_linux);
+		for (int k = 0; k < sys_mem_items.Count; k++) {
+		    outfile.Write(meminfos_headers[k + j] + ",");
+		    XmlNode item = sys_mem_items.Item(k);
+		    writeMemInfoLinux(
+			    SafeXmlParse.selNode(item, "mem_item_info"));
+		    if (!item.Attributes.Item(0).Value.Equals("post-unmap")) {
+			outfile.Write("Delta,");
+			writeMemInfoLinux(
+				SafeXmlParse.selNode(item, "mem_item_delta"));
+		    }
+		    item = null;
+		}
+	    }
+	    sys_mem_items = null;
+	}
+	outfile.Flush();
+	outfile.Close();
+
+	if (folder == null) MB.S("Wrote CSV to " + path);
+
+out_ret_1:
 	return 1;
+
+out_ret_0:
+	return 0;
     }
 
-    private static void writeCommaSeparateMemInfoLinux(XmlNode info, Harness hn)
+    /*
+     * returns string (it doesn't write to any file)
+     */
+    public static string getPivotDumpHeader(int i, Harness hn) //i = round #
     {
-	try {
-	    hn.outfile.Write
-	    (
-		SafeXmlParse.selNode(info, "free_kib").InnerText + "," +
-		SafeXmlParse.selNode(info, "buffer_kib").InnerText + "," +
-		SafeXmlParse.selNode(info, "cache_kib").InnerText + "," +
-		SafeXmlParse.selNode(info, "active_kib").InnerText + "," +
-		SafeXmlParse.selNode(info, "inactive_kib").InnerText + "," +
-		SafeXmlParse.selNode(info, "pgpgin").InnerText + "," +
-		SafeXmlParse.selNode(info, "pgpgout").InnerText + "," +
-		SafeXmlParse.selNode(info, "pswpin").InnerText + "," +
-		SafeXmlParse.selNode(info, "pswpout").InnerText + "," +
-		SafeXmlParse.selNode(info, "pgmajfault").InnerText + "\n"
-	    );
+	if (hn.pivotIndex == 8) {
+	    return (i == 5 ? "Average" : "Trial " + (i + 1));
 	}
-	catch (NullReferenceException x) {
-	    MB.S("CsvWriter.writeCommaSeparateMemInfoLinux: Null reference\n" + x.ToString());
+	switch (hn.pivotIndex) {
+	case (0):   //OS/Kernel
+	    return hn.rounds[i].operatingSystem();
+	case (1):   //Device
+	    return hn.rounds[i].swapDevice();
+	case (2):   //Phys. memory
+	    return (hn.rounds[i].valueMemory().ToString() + " memory");
+	case (3):   //Map size
+	    return (hn.rounds[i].valueMapsize().ToString() + " map");
+	case (4):   //Jobs
+	    return hn.rounds[i].jobs().ToString();
+	case (5):   //Delay
+	    switch (int.Parse(hn.rounds[i].valueDelay().ToString())) {
+	    case (0):
+		return "None";
+	    default:
+		return (hn.rounds[i].valueDelay().ToString() + " clk");
+	    }
+	case (6):   //Ratio
+	    switch (hn.rounds[i].ratio()) {
+	    case (0):
+		return "Write-only";
+	    case (100):
+		return "Read-only";
+	    default:
+		return (hn.rounds[i].ratio().ToString() + "%");
+	    }
+	case (7):   //Nice
+	    return "0"; // rounds[i].valueNice().ToString();
+	case (9): //stopgap -- current manual uses this
+	    return hn.rounds[i].customName;
+	default:
+	    return "getPivotDumpHeader: (" + i + ") index " + hn.pivotIndex;
 	}
     }
 
-    private static void writeCommaSeparateMemInfoWindows(XmlNode info, Harness hn)
-    {
-	hn.outfile.Write
-	(
-	    SafeXmlParse.selNode(info, "AvailPhys").InnerText + "," +
-	    SafeXmlParse.selNode(info, "dwMemoryLoad").InnerText + "," +
-	    SafeXmlParse.selNode(info, "TotalPageFile").InnerText + "," +
-	    SafeXmlParse.selNode(info, "AvailPageFile").InnerText + "," +
-	    SafeXmlParse.selNode(info, "AvailVirtual").InnerText + "\n"
-	);
-    }
-
-    private static void writeCommaSeparateFullBucket(List<XmlNode> nodes, int i, Harness hn)
-    {
-	//write bucket i of all nodes in order
-	double lo = Math.Pow(2, i + 7);
-	double hi = Math.Pow(2, i + 8);
-	double mid = (hi - lo) / 16;
-	for (int j = 0; j < 16; j++) //bucket hexes with indexes 0-15
-	{
-	    double gap1 = lo + (j * mid);
-	    double gap2 = gap1 + mid;
-	    hn.outfile.Write(gap1 + "," + gap2 + ",");
-	    for (int k = 0; k < nodes.Count; k++)
-	    {
-		hn.outfile.Write(SafeXmlParse.toDouble(nodes[k], "histo_bucket[@index='" + i + "']/bucket_hexes/hex[@index='" + j + "']"));
-		if (k == nodes.Count - 1) {
-		    hn.outfile.Write("\n");
-		} else {
-		    hn.outfile.Write(",");
-		}
-	    }
-	}
-    }
-
-    private static void writeCommaSeparateSumCounts(XmlNode[] buckets, Harness hn)
-    {
-	if (buckets == null) {
-	    MB.S("writeCommaSeparateSumCounts error: null buckets");
-	    return;
-	}
-	if (buckets[0] == null) {
-	    MB.S("writeCommaSeparateSumCounts error: null first element");
-	    return;
-	}
-	if (buckets[0].Attributes.Count == 0) {
-	    MB.S("writeCommaSeparateSumCounts error: zero attributes");
-	    return;
-	}
-	if (!buckets[0].Attributes.Item(0).Name.Equals("index")) {
-	    MB.S("writeCommaSeparateSumCounts error: attribute name is " + buckets[0].Attributes.Item(0).Name);
-	    return;
-	}
-	try {
-//                    int bucket_index = int.Parse(buckets[0].Attributes.Item(0).Value);
-	    double lo, hi, interval_hi = SafeXmlParse.toInt(buckets[0], "bucket_interval/interval_hi");
-	    double interval_lo = SafeXmlParse.toInt(buckets[0], "bucket_interval/interval_lo");
-	    lo = Math.Pow(2, interval_lo);
-	    hi = Math.Pow(2, interval_hi);
-	    hn.outfile.Write(lo + "," + hi + ",");
-	    for (int j = 0; j < buckets.Length; j++)
-	    {
-		hn.outfile.Write(SafeXmlParse.toDouble(buckets[j], "sum_count"));
-		if (j == buckets.Length - 1) hn.outfile.Write("\n");
-		else hn.outfile.Write(",");
-	    }
-	}
-	catch (ArgumentException x) {
-	    MB.S("writeCommaSeparateSumCounts ArgumentException:\n" + x.ToString());
-	    return;
-	}
-    }
-
-    public static void writeCommaSeparatePivotHistogramList(List<XmlNode> nodes, Harness hn)
-    {
-	//MB.S("writeCommaSeparatePivotHistogramList: Received a list of " + nodes.Count + " nodes");
-	XmlNodeList[] bucket0s = new XmlNodeList[nodes.Count];
-	hn.outfile.Write("0,256,");
-	for (int i = 0; i < nodes.Count; i++)
-	{
-	    if (nodes[i] == null) {
-		MB.S("writeCommaseparatePivotHistogramList: Received null node at position " + i);
-		return;
-	    }
-
-	    //bucket0s[i] contains all of the bucket 0's for round i
-	    bucket0s[i] = nodes[i].SelectNodes("histo_bucket[@index='0']");
-
-	    if (SafeXmlParse.toInt(bucket0s[i].Item(0), "bucket_interval/interval_lo") != 0)
-	    {
-		MB.S("commaSeparateHistogramList: missing hit_counts_sum on test round " + i + 1);
-	    }
-
-	    hn.outfile.Write(SafeXmlParse.toDouble(bucket0s[i].Item(0), "sum_count"));
-	    if (i == nodes.Count - 1) {
-		hn.outfile.Write("\n");
-	    } else {
-		hn.outfile.Write(",");
-	    }
-	}
-
-	for (int i = 1; i < 16; i++) //buckets with indexes 1-15
-	{
-	    if (hn.showFull) {
-		writeCommaSeparateFullBucket(nodes, i, hn);
-	    } else {
-		XmlNode[] buckets = new XmlNode[nodes.Count];
-		for (int k = 0; k < nodes.Count; k++)
-		{
-		    buckets[k] = SafeXmlParse.selNode(nodes[k], "histo_bucket[@index='" + i + "']");
-		}
-		writeCommaSeparateSumCounts(buckets, hn);
-	    }
-	}
-	for (int i = 1; i < bucket0s[0].Count; i++) //skip the first sum_count
-	{
-	    try {
-		XmlNode[] bucket0s_high = new XmlNode[nodes.Count];
-		for (int k = 0; k < nodes.Count; k++)
-		{
-		    bucket0s_high[k] = bucket0s[k].Item(i);
-		}
-		writeCommaSeparateSumCounts(bucket0s_high, hn);
-	    }
-	    catch (IndexOutOfRangeException x) {
-		MB.S("Index out of range exception at " + i.ToString() + " of " + bucket0s[0].Count + ":\n" + x.ToString());
-	    }
-	}
-	bucket0s = null;
-	hn.outfile.Write("\n");
-    }
 }   // CsvWriter
 
 
 //
 // Xml data importer for PivotChart 
 // 
-public static class XmlToChart
+public static class XmlToSeries
 {
-    private static void writeHexBinsToChart(
+    private static void writeHexBinsToSeries(
 	    XmlNode bucket,
 	    double interval_lo, 
 	    double interval_hi,
-	    Chart c, 
-	    AccessType type)
+	    Series series)
     {
 	//get the midpoint between interval values
-	string sname = (type == AccessType.read ? "read" : "write");
 	double interval_ = (interval_hi - interval_lo) / 16;
 	for (int j = 0; j < 16; j++) //graph it (involves retrieving bucket sub hex index), skipping nodes with no samples
 	{
@@ -1380,128 +1351,121 @@ public static class XmlToChart
 		    "bucket_hexes/hex[@index='" + j + "']");
 	    //if (hex == 0) { continue; }
 	    double xval = interval_lo + (0.5 + j) * interval_;
-	    c.Series[sname].Points.AddXY(xval, hex);
+	    series.Points.AddXY(xval, hex);
 	}
     }
 
-    private static void writeSumCountOnlyToChart(
-	    XmlNode bucket, 
-	    Chart c, 
-	    AccessType type)
+    private static void writeSumCountOnlyToChart(XmlNode bucket, Series series)
     {
-	string sname = (type == AccessType.read ? "read" : "write");
 	double sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
 	//if (sum_count == 0) { return; }
 	double interval_lo = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_lo");
 	double interval_hi = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_hi");
 	double interval_ = (interval_hi - interval_lo);
 	double xval = interval_lo + (interval_ / 2);
-	c.Series[sname].Points.AddXY(xval, sum_count);
+	series.Points.AddXY(xval, sum_count);
     }
-
+    
     // get the chart ready. Important for the Series that is produced.
-    public static void getHisto(
-	    Chart chart, 
+    private static void getHisto_body(
+	    Series series, 
 	    XmlNode stats, 
-	    AccessType type, 
-	    Color color, 
+	    string sname,
 	    bool full)
     {
-	string sname = (type == AccessType.read ? "read" : "write");
-	XmlNode histogram = SafeXmlParse.selNode(stats, "histogram[@type='" + sname + "']");
+	XmlNode histogram = SafeXmlParse.selNode(stats,
+		"histogram[@type='" + sname + "']");
 
-	if (histogram != null) {
-	    XmlNode bucket;
-	    double interval_lo, interval_hi, sum_count;
-	    XmlNodeList bucket0;
+	if (histogram == null) return; // nothing in there..
 
-	    Series series = new Series();
-	    series.ChartArea = (full ? "hex_bins" : "sum_count");
-	    series.Legend = "Legend1";
-	    series.Name = sname;
-	    chart.Series.Add(series);
+	XmlNode bucket;
+	double interval_lo, interval_hi, sum_count;
+	XmlNodeList bucket0;
 
-	    //get all histo_buckets with index 0 (for very large and very small latencies) and deal with the first one (< 2^8 ns)
-	    bucket0 = histogram.SelectNodes("histo_bucket[@index='0']");
-	    bucket = bucket0.Item(0);
-	    sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
-	    chart.Series[sname].Points.AddXY(8, sum_count);
-	    chart.Series[sname].Points.AddXY(8, sum_count);
+	series.Name = sname;
 
-	    //intentionally miscalculates x coordinate because 
-	    //(2^lo+(j+0.5)*((2^hi-2^lo)/16)) stretches the x axis
-	    for (int i = 1; i < 16; i++) {
-		bucket = SafeXmlParse.selNode(histogram, 
-			"histo_bucket[@index='" + i + "']");
-		if (full) {
-		    interval_lo = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_lo");
-		    interval_hi = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_hi");
-		    writeHexBinsToChart(bucket, interval_lo, interval_hi, chart, type);
-		} else {
-		    writeSumCountOnlyToChart(bucket, chart, type);
-		}
+	//get all histo_buckets with index 0 
+	//(for very large and very small latencies) 
+	//and deal with the first one (< 2^8 ns)
+	bucket0 = histogram.SelectNodes("histo_bucket[@index='0']");
+	bucket = bucket0.Item(0);
+	sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
+
+	series.Points.AddXY(8, sum_count);
+	series.Points.AddXY(8, sum_count);
+
+	//intentionally miscalculates x coordinate because 
+	//(2^lo+(j+0.5)*((2^hi-2^lo)/16)) stretches the x axis
+	for (int i = 1; i < 16; i++) {
+	    bucket = SafeXmlParse.selNode(histogram, 
+		    "histo_bucket[@index='" + i + "']");
+	    if (full) {
+		interval_lo = (double)SafeXmlParse.toInt(bucket, 
+			"bucket_interval/interval_lo");
+		interval_hi = (double)SafeXmlParse.toInt(bucket,
+			"bucket_interval/interval_hi");
+		writeHexBinsToSeries(bucket, interval_lo, interval_hi, 
+			series);
+	    } else {
+		writeSumCountOnlyToChart(bucket, series);
 	    }
-
-	    for (int j = 1; j < bucket0.Count; j++) //deal with the rest of the index 0 histo buckets
-	    {
-		bucket = bucket0.Item(j);
-		writeSumCountOnlyToChart(bucket, chart, type);
-	    }
-	    chart.Series[sname].ChartType = SeriesChartType.FastLine;
-	    chart.Series[sname].Color = color;
-	    bucket = null;
-	    bucket0 = null;
 	}
-	histogram = null;
+	
+	//deal with the rest of the index 0 histo buckets
+	for (int j = 1; j < bucket0.Count; j++) {
+	    bucket = bucket0.Item(j);
+	    writeSumCountOnlyToChart(bucket, series);
+	}
+	bucket = null;
+	bucket0 = null;
     }
-}   // XmlToChart
 
-
-///////////
-//
-//
-// This is new class factored out from PivotChart.
-// This class is the one that has master copy of datapoints.
-//
-///////////
-public class MasterDataChart
-{
-    private Chart mini, full;
-
-    public MasterDataChart(XmlNode node)
+    public static void getHisto(Series[] serial, XmlNode stats, bool full)
     {
-Console.WriteLine("MasterDataChart() constructor");
-	ChartArea ca; 
+	getHisto_body(serial[0], stats, "read", full);
+	getHisto_body(serial[1], stats, "write", full);
+    }
+
+}   // XmlToSeries
+
+
+///////////
+// This is new class factored out from PivotChart.
+// This class is the one that has a copy of datapoints.
+///////////
+public class PlotPoints
+{
+    private Series[] mini;
+    private Series[] full;
+
+    //
+    // populates items
+    public PlotPoints(XmlNode node)
+    {
 	XmlNode stats;
 
-	mini = new Chart();
-	ca = new ChartArea();
-	ca.Name = "sum_count";
-	mini.ChartAreas.Add(ca);
+	mini = new Series[2];
+	mini[0] = new Series();	// read
+	mini[1] = new Series(); // write
 
-	full = new Chart();
-	ca = new ChartArea();
-	ca.Name = "sum_count";
-	full.ChartAreas.Add(ca);
+	full = new Series[2];
+	full[0] = new Series(); // read
+	full[1] = new Series(); // write
 
 	stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
-	XmlToChart.getHisto(mini, stats, AccessType.read, Color.Blue, false);
-	XmlToChart.getHisto(mini, stats, AccessType.write, Color.Red, false);
+	XmlToSeries.getHisto(mini, stats, false); // read and write
 
 	stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
-	XmlToChart.getHisto(full, stats, AccessType.read, Color.Blue, true);
-	XmlToChart.getHisto(full, stats, AccessType.write, Color.Red, true);
-
-	stats = null;
+	XmlToSeries.getHisto(full, stats, true);
     }
 
-    public Chart getDataChart(DetailLevel detail)
+    public Series getSeries(DetailLevel detail, Access type)
     {
 	switch (detail) {
-	case (DetailLevel.minitype):
-	    return mini;
-	case (DetailLevel.fulltype):
-	    return full;
+	case (DetailLevel.mini):
+	    return mini[type == Access.read ? 0: 1];
+	case (DetailLevel.full):
+	    return full[type == Access.read ? 0: 1];
 	case (DetailLevel.currenttype):
 	    MB.S("MDC::getChart : unsupported detail level");
 	    return null;
@@ -1515,12 +1479,12 @@ Console.WriteLine("MasterDataChart() constructor");
 //
 //
 //
-//
-//
 ///////////
 public class PivotChart
 {
-    private class BetterSeries
+    // Contains and controls two Series for the same dataset.
+    // oldname: BetterSeries
+    private class BiSeries
     {
 	protected Series miniSeries, fullSeries;
 	protected Series currentSeries;
@@ -1528,26 +1492,22 @@ public class PivotChart
 	private string seriesName;
 
 	public bool selected { set; get;}
-	private bool grayed {set; get;}
+	public bool grayed { set; get;}
 
-	protected Color backupColor;
+	public Color activeColor;
 	static Color unselectedColor = Color.FromArgb(32, 32, 32, 32);
 	public BenchRound theBenchRound { set; get; }
-	private AccessType myAccessType;
-
-	public AccessType getMyAccessType() { return myAccessType; }
+	private Access myAccessType;
 
 	public void updateSelectionColor(int sel)
 	{
 	    if (!selected && sel > 0) {
 		if (!grayed) {
-		    saveBackupColor(miniSeries.Color);
 		    setColor(unselectedColor);
 		    grayed = true;
 		}
 	    } else {
-		setColor(backupColor);
-		saveBackupColor(setColor(backupColor));
+		setColor(activeColor);
 		grayed = false;
 	    }
 	}
@@ -1555,33 +1515,33 @@ public class PivotChart
 	public string deleteFlagYourselfIfSelected()
 	{
 	    if (!selected) return null;
+
 	    selected = false;
-	    theBenchRound.setDeletionFlag(this.myAccessType);
+	    theBenchRound.setDeletionFlag(myAccessType);
+
 	    setSeriesEnabled(false);
 	    return seriesName;
 	}
 
-	public string undeleteYourself()
+	/*
+	 * this blows up and frees all series data 
+	 */
+	public string finalizeDeletion(Chart mini, Chart full)
 	{
-	    theBenchRound.unsetDeletionFlag(this.myAccessType);
-	    setSeriesEnabled(true);
-	    return seriesName;
-	}
-
-	public string finalizeDeletion(Chart sc, Chart fc)
-	{
-	    if (!selected) return null;
-	    sc.Series.Remove(miniSeries);
+	    mini.Series.Remove(miniSeries);
 	    miniSeries.Dispose();
 	    miniSeries = null;
-	    fc.Series.Remove(fullSeries);
+
+	    full.Series.Remove(fullSeries);
 	    fullSeries.Dispose();
 	    fullSeries = null;
+
 	    currentSeries = null;
 	    selected = false;
 	    grayed = false;
+
 	    string s = seriesName;
-	    theBenchRound.setDeletionFlag(this.myAccessType);
+	    theBenchRound.setDeletionFlag(myAccessType);
 	    theBenchRound = null;
 	    return s;
 	}
@@ -1617,11 +1577,6 @@ public class PivotChart
 	    return currentSeries.Name;
 	}
 
-	public Color saveBackupColor(Color c)
-	{
-	    backupColor = c;
-	    return backupColor;
-	}
 
 	public Color setColor(Color c)
 	{
@@ -1630,48 +1585,52 @@ public class PivotChart
 	    return c;
 	}
 
-	public BetterSeries()
+	public BiSeries()
 	{
 	    miniSeries = null;
 	    fullSeries = null;
 	    currentSeries = null;
 	    seriesName = null;
 	    selected = false;
-	    backupColor = unselectedColor;
+	    activeColor = unselectedColor;
 	    grayed = false;
-	    myAccessType = AccessType.uninitialized;
+	    myAccessType = Access.uninitialized;
 	}
 
-	public Series setContainedSeries(Series series, AccessType type)
+	public Series setContainedSeries(Series series,
+		DetailLevel detail, Access type)
 	{
-	    switch (series.Points.Count) {
-	    case (250):
-		if (this.fullSeries == null) fullSeries = series;
-		else MB.S("setContainedSeries: full series " + series.Name + " is already set");
+	    switch (detail) {
+	    case DetailLevel.full:
+		if (fullSeries == null) fullSeries = series;
+		else MB.S("setContainedSeries: full series is already set");
 		break;
-	    case (25):
-		if (this.miniSeries == null) miniSeries = series;
+	    case DetailLevel.mini:
+		if (miniSeries == null) miniSeries = series;
 		else MB.S("setContainedSeries: mini series is already set");
 		break;
 	    default:
-		MB.S("setContainedSeries: Found a series with " + series.Points.Count + " points, something went wrong");
+		MB.S("setContainedSeries: error");
 		return series;
 	    }
 
 	    if (seriesName == null) {
 		seriesName = series.Name;
-		saveBackupColor(series.Color);
 		myAccessType = type;
 	    }
 	    return series;
 	}
     }
 
-    private class HoverSeries : BetterSeries
+    /*
+     * I don't know why this is necessary..
+     */
+    private class HoverSeries : BiSeries
     {
+	private Series lastDrawn;
+
 	private Series initializeHoverSeries(Series s)
 	{
-Console.WriteLine("initializeHoverSeries called");
 	    s.ChartType = SeriesChartType.SplineArea;
 	    s.Enabled = false;
 	    s.IsVisibleInLegend = false;
@@ -1681,12 +1640,27 @@ Console.WriteLine("initializeHoverSeries called");
 	public HoverSeries(PivotChart pivotchart)
 	{
 	    string hts = "hover_short", htf = "hover_full";
+	    lastDrawn = null;
 
 	    pivotchart.miniChart.Series.Add(hts);
 	    miniSeries = initializeHoverSeries(pivotchart.miniChart.Series.FindByName(hts));
 
 	    pivotchart.fullChart.Series.Add(htf);
 	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series.FindByName(htf));
+	}
+
+	public void updateHoverSeries(Series s, Chart ch)
+	{
+	    if (s == null) return;
+
+	    if (ReferenceEquals(lastDrawn, s)) return;
+	    setColor(s.Color);
+
+	    // redrawing by copying data series is expensive.. but..
+	    ch.Series[getSeriesName()].Points.Clear();
+	    ch.DataManipulator.CopySeriesValues(s.Name, getSeriesName());
+
+	    lastDrawn = s;
 	}
     }
 
@@ -1697,20 +1671,72 @@ Console.WriteLine("initializeHoverSeries called");
     private bool showFull { set; get; }
     private Random randomColorState;
 
-    private Dictionary<string, BetterSeries> allSeries;
+    private Dictionary<string, BiSeries> allSeries;
     private int selectionCount;
-    public List<string> flaggedForDeletion;
-    private Dictionary<string, BetterSeries> partnerSeries;
+    private Dictionary<string, BiSeries> partnerSeries;
 
-    public string getBetterSeriesName(BenchRound round, AccessType type)
+
+    public void testerror_dumpSelectionStatus()
     {
-	string append = " (" + (type == AccessType.read ? "read" : "write") + ")";
-	try {
-	    return allSeries[round.customName + append].getSeriesName();
+	Console.WriteLine("PovitChart::dumpSelectionStatus()");
+	Console.WriteLine(" selectionCount:{0}", selectionCount);
+	Console.WriteLine(" allSeries.Count:{0}", allSeries.Count);
+	var iter = allSeries.Values.GetEnumerator();
+	int i = 0;
+	while (iter.MoveNext()) {
+	    Console.WriteLine("  item {0}: selected={1},grayed={2}",
+		    i++, iter.Current.selected, iter.Current.grayed);
 	}
-	catch (ArgumentException) {
-	    return null;
+    }
+
+    public void testerror_dumpChartSeries()
+    {
+	Console.WriteLine("PovitChart::dumpChartSeries()");
+
+	Console.WriteLine(" allSeries.Count:{0}", allSeries.Count);
+	var iter = allSeries.Keys.GetEnumerator();
+	int i = 0;
+	while (iter.MoveNext()) {
+	    Console.WriteLine("  item {0}: Key={1}", i++, iter.Current);
 	}
+
+	Console.WriteLine(" partnerSeries.Count:{0}", partnerSeries.Count);
+	var iter_ps = partnerSeries.Keys.GetEnumerator();
+	i = 0;
+	while (iter_ps.MoveNext()) {
+	    Console.WriteLine("  item {0}: Key={1}", i++, iter_ps.Current);
+	}
+
+	Console.WriteLine(" miniChart.Series.Count:{0}", 
+		miniChart.Series.Count);
+	var iter_mi = miniChart.Series.GetEnumerator();
+	i = 0;
+	while (iter_mi.MoveNext()) {
+	    Console.WriteLine("  item {0}:name={1}", 
+		    i++, iter_mi.Current.Name);
+	}
+
+	Console.WriteLine(" fullChart.Series.Count:{0}", 
+		fullChart.Series.Count);
+	var iter_fu = fullChart.Series.GetEnumerator();
+	i = 0;
+	while (iter_fu.MoveNext()) {
+	    Console.WriteLine("  item {0}:name={1}", 
+		    i++, iter_fu.Current.Name);
+	}
+
+    }
+
+    public void resetAllSelection()
+    {
+	var iter = allSeries.Values.GetEnumerator();
+
+	while (iter.MoveNext()) {
+	    iter.Current.selected = false;
+	    iter.Current.grayed = false;
+	}
+
+	selectionCount  = 0;
     }
 
     public int getSelectionCount()
@@ -1718,47 +1744,45 @@ Console.WriteLine("initializeHoverSeries called");
 	return selectionCount;
     }
     
-    //this is complicated and cumbersome in part 
-    //because I intended to add an undelete option
-    public int deleteFlagSelected(bool nag)
+    public int deleteSelectedChartObjects()
     {
-	var checkus = allSeries.Values.GetEnumerator();
-	string s = null;
+	List<string> deletionList = new List<string>();
 
-//                List<string> deleteus = new List<string>();
-	while (checkus.MoveNext()) {
-	    s = checkus.Current.deleteFlagYourselfIfSelected();
-	    if (s != null) flaggedForDeletion.Add(s);
+	var iter = allSeries.Values.GetEnumerator();
+
+	// build up list while flagging corresponding benchround obj
+	while (iter.MoveNext()) {
+	    string s = iter.Current.deleteFlagYourselfIfSelected();
+	    if (s != null) deletionList.Add(s);
 	}
-	selectionCount -= flaggedForDeletion.Count;
-	return flaggedForDeletion.Count;
-    }
 
-    public int finalizeDeletions(int howmany)
-    {
-	int ret = flaggedForDeletion.Count;
-	for (int i = 0; i < ret; i++)
-	{
-	    BetterSeries bs = allSeries[flaggedForDeletion[i]];
-	    allSeries.Remove(flaggedForDeletion[i]);
+	selectionCount -= deletionList.Count;
+
+	int count = deletionList.Count;
+
+	if (count == 0) return 0;
+
+	foreach (var name in deletionList) {
+	    BiSeries bs = allSeries[name];
+	    allSeries.Remove(name);
+	    partnerSeries.Remove(name);	// no exception even if not found
 	    bs.finalizeDeletion(miniChart, fullChart);
 	}
-	flaggedForDeletion.Clear();
-	return ret;
+
+	return count;
     }
 
-    // this constructor is used to produced the displayed chart 
     public PivotChart(Harness hn, int width, int height)
     {
-Console.WriteLine("PivotChart() constructor");
-	allSeries = new Dictionary<string, BetterSeries>();
-	partnerSeries = new Dictionary<string, BetterSeries>();
+	allSeries = new Dictionary<string, BiSeries>();
+	partnerSeries = new Dictionary<string, BiSeries>();
+
 	hoverSeries = null;
-	randomColorState = new Random(int.Parse("0ddfaced", System.Globalization.NumberStyles.HexNumber));
-	flaggedForDeletion = new List<string>();
+	randomColorState = new Random(int.Parse("0ddfaced", 
+		    System.Globalization.NumberStyles.HexNumber));
 	selectionCount = 0;
 
-	this.harness = hn;
+	harness = hn;
 
 	for (int i = 0; i < 2; i++) {
 	    string s = null;
@@ -1832,7 +1856,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 
 	hoverSeries.setColor(s.Color);
 
-	// redrawing by copying data series is expensive..
+	// redrawing by copying data series is expensive.. but..
 	currentChart.Series[hoverSeries.getSeriesName()].Points.Clear();
 	currentChart.DataManipulator.CopySeriesValues(s.Name, hoverSeries.getSeriesName());
 
@@ -1850,20 +1874,19 @@ Console.WriteLine("createHoverSeries(): already exists");
 
     private void chartMouseEnter(object sender, EventArgs e)
     {
-	Chart theChart = sender as Chart;
-	if (!theChart.Focused) theChart.Focus();
+	Chart chart = sender as Chart;
+	if (!chart.Focused) chart.Focus();
 
 	hoverSeries.setSeriesEnabled(true);
     }
 
     private void chartMouseLeave(object sender, EventArgs e)
     {
-	Chart theChart = sender as Chart;
-	if (theChart.Focused) theChart.Parent.Focus();
+	Chart chart = sender as Chart;
+	if (chart.Focused) chart.Parent.Focus();
 
 	hoverSeries.setSeriesEnabled(false);
     }
-
 
     public void chartMouseHover(object sender, EventArgs args)
     {
@@ -1874,11 +1897,18 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    if (htr.Object == null) return; //error?
 
 	    Series s = currentChart.Series[(htr.Object as LegendItem).SeriesName];
-	    updateHoverSeries(s);
+	    // bring the series to the front to highlight
+	    //if (s != null) {
+	//	currentChart.Series.Remove(s);
+	//	currentChart.Series.Add(s);
+	 //   }
+
+	    //s.BorderWidth = 4;
+	    hoverSeries.updateHoverSeries(s, currentChart);
 	} 
     }
 
-    private void toggleSelection(BetterSeries bs)
+    private void toggleSelection(BiSeries bs)
     {
 	selectionCount += bs.toggleSelected(selectionCount);
     }
@@ -1907,6 +1937,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 	while (iter.MoveNext()) {
 	    if (!iter.Current.selected) toggleSelection(iter.Current);
 	}
+
 	harness.pmgraph.updateSelectionButtons(selectionCount);
     }
 
@@ -1939,16 +1970,15 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    allSeries[li.SeriesName].theBenchRound.seriesObject.displaySpikes();
 	    break;
 	case (MouseButtons.Left):
-	    try {
-		BetterSeries bs = this.allSeries[li.SeriesName];
-		toggleSelection(bs); 
-		toggleSelection(partnerSeries[bs.getSeriesName()]);
-		refreshSelectionColors(); 
+	    BiSeries bs_a = allSeries[li.SeriesName];
+	    toggleSelection(bs_a); 
+
+	    BiSeries bs_b;
+	    if (partnerSeries.TryGetValue(bs_a.getSeriesName(), out bs_b)) {
+		toggleSelection(bs_b);
 	    }
-	    catch (KeyNotFoundException) {
-		MB.S("toggleLegendItemSelection: key " 
-			+ li.SeriesName + " not found.");
-	    }
+
+	    refreshSelectionColors();
 	    break;
 	case (MouseButtons.Right):
 	    break;
@@ -1957,10 +1987,10 @@ Console.WriteLine("createHoverSeries(): already exists");
 
     private static void chartZoom(object sender, MouseEventArgs args)
     {
-	Chart theChart = sender as Chart;
+	Chart chart = sender as Chart;
 
-	Axis x = theChart.ChartAreas.FindByName("histogram").AxisX;
-	Axis y = theChart.ChartAreas.FindByName("histogram").AxisY;
+	Axis x = chart.ChartAreas.FindByName("histogram").AxisX;
+	Axis y = chart.ChartAreas.FindByName("histogram").AxisY;
 
 	double xMin = x.ScaleView.ViewMinimum;
 	double xMax = x.ScaleView.ViewMaximum;
@@ -1989,9 +2019,9 @@ Console.WriteLine("createHoverSeries(): already exists");
     public Chart getChart(DetailLevel detail)
     {
 	switch (detail) {
-	case (DetailLevel.minitype):
+	case (DetailLevel.mini):
 	    return miniChart;
-	case (DetailLevel.fulltype):
+	case (DetailLevel.full):
 	    return fullChart;
 	case (DetailLevel.currenttype):
 	    return currentChart;
@@ -2000,14 +2030,25 @@ Console.WriteLine("createHoverSeries(): already exists");
 	}
     }
 
-    private static Color[] readColors = { 
+    public static Color[] readColors = { 
 	Color.Blue, Color.Cyan, Color.Green, 
 	Color.MidnightBlue, Color.DarkCyan, 
 	Color.BlueViolet, Color.LimeGreen };
-    private static Color[] writeColors = {
+
+    public static Color[] writeColors = {
 	Color.Red, Color.Fuchsia, Color.Orange,
 	Color.SaddleBrown, Color.Maroon,
 	Color.Chocolate, Color.HotPink};
+
+    //  needs better color assignment...
+    public Color getColor(int i, Access type)
+    {
+	if (i <= 6) {
+	    return type == Access.read ? readColors[i] : writeColors[i];
+	} else {
+	    return Color.FromArgb(getRandomColorState(type == Access.read));
+	}
+    }
 
     private int getRandomColorState(bool read)
     {
@@ -2015,112 +2056,118 @@ Console.WriteLine("createHoverSeries(): already exists");
     }
 
     /*
-     * produce Series from BenchRound using options
-     * it populates internal objects along the way. Ugh
+     * rewrite of produce Series from BenchRound using options.
+     * it populates internal objects along the way.
      * (old name: collectDataPoints()) 
      */
-    private Series produceSeries(
-	    BenchRound br,
-	    DetailLevel detail,
-	    AccessType type,
-	    int i) 
+    private Series produceSeries(BenchRound br, DetailLevel detail, Access type)
     {
-	string sname = (type == AccessType.read ? "read" : "write");
+	string sname = (type == Access.read ? "read" : "write");
 
-	// this produces Chart of data pivotchart of benchround..
-	Chart chart = br.getDataChart(detail);	
 	Series series = new Series();
 
 	series.ChartArea = "histogram";
 	series.Legend = "Legend";
-	series.Name = harness.getPivotDumpHeader(i) + " (" + sname + ")";
+	series.Name = br.customName + " (" + sname + ")";
 
-	if (detail == DetailLevel.fulltype) {
+	if (detail == DetailLevel.full) {
 	    br.registerSeriesName(series.Name, type);
 	}
 
-	// copying data points 
-	DataPoint[] dp = new DataPoint[chart.Series[sname].Points.Count];
-
-//Console.WriteLine("DataPiont Length:{0}", dp.Length);
-	// copy points data from Series[sname] to dp array starting at idx 0: 
-	chart.Series[sname].Points.CopyTo(dp, 0);
-	// now insert the points to new series one by one
-	for (int j = 0; j < dp.Length; j++) {
-	    series.Points.Insert(j, dp[j]);
-	}
+	// copy data points from benchround's cache to this series
+	br.copyDataPointsTo(series, detail, type);
 
 	// set chart graphic properties
 	series.BorderWidth = 2;
 	series.ChartType = SeriesChartType.FastLine;
-	if (i <= 6) {
-	    series.Color = (type == AccessType.read ? readColors[i] : writeColors[i]);
-	} else {
-	    series.Color = Color.FromArgb(getRandomColorState(type == AccessType.read));
-	}
-
-	// take care of BetterSeries 
-	// (got rid of try/catch KeyNotFoundException)
-	BetterSeries bs;
-	if (allSeries.TryGetValue(series.Name, out bs)) {
-Console.WriteLine("produceSeries: reusing BetterSeries");
-	    bs.setContainedSeries(series, type);
-	} else {
-Console.WriteLine("produceSeries: Creating new BetterSeries");
-	    bs = new BetterSeries();
-	    bs.setContainedSeries(series, type);
-	    allSeries[series.Name] = bs;
-	    bs.theBenchRound = br;
-	    // add to partnerlookup
-	    string pname = harness.getPivotDumpHeader(i) + " (" + (type == AccessType.read ? "write" : "read") + ")";
-	    partnerSeries.Add(pname, bs);
-	}
 
 	return series;
     }
 
     /*
-     * called by Harness initializePivotChart
-     * (old name: addCollectedPoints())
+     * called by Harness::initializePivotChart
      */
-    public void addSeries(BenchRound br, AccessType s, int i)
+    public void addSeries(BenchRound br)
     {
 	Series series;
-	
-	// sanity check
-	if (miniChart == null || miniChart.Series == null) MB.S("shjit");
+	BiSeries bs;
+	Color color;
 
-	// add mini series
-	series = produceSeries(br, DetailLevel.minitype, s, i);
-	miniChart.Series.Add(series);
-	
-	// add full series
-	series = produceSeries(br, DetailLevel.fulltype, s, i);
-	fullChart.Series.Add(series);
+	if (br.ratio() > 0) {	// read data exist
+	    bs = new BiSeries();
+	    bs.theBenchRound = br;
+	    color = getColor(734, Access.read);
+
+	    // add mini series
+	    series = produceSeries(br, DetailLevel.mini, Access.read);
+	    bs.setContainedSeries(series, DetailLevel.mini, Access.read);
+	    miniChart.Series.Add(series);
+
+	    // add full series
+	    series = produceSeries(br, DetailLevel.full, Access.read);
+	    bs.setContainedSeries(series, DetailLevel.full, Access.read);
+	    fullChart.Series.Add(series);
+
+	    allSeries[series.Name] = bs;
+	    bs.activeColor = color;
+	    bs.setColor(bs.activeColor);
+	    
+	    // populating partnerSeries information
+	    if (br.ratio() >= 100) {
+		; // don't have partner series..
+	    } else {
+		// below hack relies on how we name series..
+		string pname = br.customName + " (write)";
+		partnerSeries.Add(pname, bs);
+	    }
+	}
+
+	if (br.ratio() < 100) {  // write data exist
+	    bs = new BiSeries();
+	    bs.theBenchRound = br;
+	    color = getColor(734, Access.write);
+
+	    // add mini series
+	    series = produceSeries(br, DetailLevel.mini, Access.write);
+	    bs.setContainedSeries(series, DetailLevel.mini, Access.write);
+	    miniChart.Series.Add(series);
+	    
+	    // add full series
+	    series = produceSeries(br, DetailLevel.full, Access.write);
+	    bs.setContainedSeries(series, DetailLevel.full, Access.write);
+	    fullChart.Series.Add(series);
+
+	    allSeries[series.Name] = bs;
+	    bs.activeColor = color;
+	    bs.setColor(bs.activeColor);
+	    
+	    // populating partnerSeries information
+	    if (br.ratio() <= 0) {
+		; // don't have partner series..
+	    } else {
+		// below hack relies on how we name series..
+		string pname = br.customName + " (read)";
+		partnerSeries.Add(pname, bs);
+	    }
+	}
     }
+
 }   // PivotChart
 
 
-
 ///////////
 //
 //
 //
-//
-//
 ///////////
-
-// a benchmark with comparisons to some other stuff
-//public class BenchPivot {
 public class Harness
 {
     public int pivotIndex;
     public ParamSet baseParams;
     public List<BenchRound> rounds;
-    private PivotChart thePivotChart;
+    public PivotChart thePivotChart; // turn back to private after debug
     private bool chartReady;
     public PmGraph pmgraph;
-    public StreamWriter outfile;
     public bool dumped = false;
     public bool showFull { set; get; }
 
@@ -2160,98 +2207,77 @@ public class Harness
 	pmgraph.updateSelectionButtons(0);
 
 	XmlDocument doc = new XmlDocument();
-	XmlNode fakeSeries = doc.CreateNode(XmlNodeType.Element, "test_nice", doc.NamespaceURI);
+	XmlNode fakeSeries = doc.CreateNode( XmlNodeType.Element, 
+		"test_nice", doc.NamespaceURI);
 	doc.AppendChild(fakeSeries);
 	ParamSet ps = new ParamSet();
 	int flagcount = 0;
 
-	try {
-	    foreach (var r in rounds) {
-		if (!r.flaggedForAverage) continue;
+	foreach (var r in rounds) {
+	    if (!r.flaggedForAverage) continue;
 
-		XmlDocument tempdoc = r.roundNode.OwnerDocument;
-		XmlNode fakeRound = doc.CreateNode(XmlNodeType.Element, 
-			"test_round", 
-			doc.NamespaceURI);
-		XmlAttribute iter = doc.CreateAttribute("iter");
-		iter.Value = (flagcount++ + 1).ToString();
-		fakeRound.Attributes.Append(iter);
-		if (SafeXmlParse.selNode(tempdoc, 
-			    "test_nice/test_round/pmbenchmark") == null) {
-		    MB.S("pmbenchmark node not found; root element is " + tempdoc.DocumentElement.Name);
-		}
-		fakeRound.AppendChild(doc.ImportNode(SafeXmlParse.selNode(tempdoc, "test_nice/test_round/pmbenchmark"), true));
-		fakeSeries.AppendChild(fakeRound);
-		ps.setParamsFromNode(PmGraph.getParamsNodeFromSeriesNode(fakeSeries));
-		ps.operatingSystem = SafeXmlParse.selNode(tempdoc, 
-			"test_nice/test_round/pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
+	    XmlDocument tempdoc = r.roundNode.OwnerDocument;
+	    XmlNode fakeRound = doc.CreateNode(XmlNodeType.Element, 
+		    "test_round", doc.NamespaceURI);
+
+	    XmlAttribute iter = doc.CreateAttribute("iter");
+	    iter.Value = (flagcount++ + 1).ToString();
+	    fakeRound.Attributes.Append(iter);
+
+	    if (SafeXmlParse.selNode(tempdoc, 
+			"test_nice/test_round/pmbenchmark") == null) {
+		MB.S("pmbenchmark node not found; root element is " 
+			+ tempdoc.DocumentElement.Name);
 	    }
-	}
-	catch (FileNotFoundException x) {
-	    MB.S("averageSelected: FileNotFoundException\n" + x.ToString());
-	    return null;
-	}
-	catch (ArgumentException x) {
-	    MB.S("averageSelected: ArgumentException\n" + x.ToString());
-	    return null;
+	    fakeRound.AppendChild(doc.ImportNode(
+			SafeXmlParse.selNode(tempdoc, 
+			    "test_nice/test_round/pmbenchmark"), true));
+	    fakeSeries.AppendChild(fakeRound);
+
+	    ps.setParamsFromNode(PmGraph.getParamsNodeFromSeriesNode(fakeSeries));
+	    ps.operatingSystem = SafeXmlParse.selNode(tempdoc, 
+		    "test_nice/test_round/pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
 	}
 
-	BenchSiblings bs = new BenchSiblings(fakeSeries, doc, ps);
-	bs.trialsPerSeries = flagcount;
+	BenchSiblings bench = new BenchSiblings(fakeSeries, doc, ps);
+	bench.trialsPerSeries = flagcount;
+
 	string temp = "Average" + avgc++;
 	string temp2 = TextDialog("Enter name for new average", temp);
 
-	if (temp2 != null) bs.averageRound.customName = temp2;
-	else bs.averageRound.customName = temp;
+	if (temp2 != null) bench.averageRound.customName = temp2;
+	else bench.averageRound.customName = temp;
 
+	// NB. caller calls registerXmlDocName(name, doc). 
 	thePivotChart.selectNone();
-	return bs;
+	return bench;
     }
 
-    public int deleteSelected(bool nag)
+    public int deleteSelected()
     {
-	bool debug = false;
-	int deleted = thePivotChart.finalizeDeletions(thePivotChart.flaggedForDeletion.Count);
+	// first, clean up GUI - blow up the Chart series object
+	int deleted = thePivotChart.deleteSelectedChartObjects();
 
-	if (deleted > 0) {
-	    foreach (var r in rounds) {
-		if (r.hasPendingDeletions) r.deleteSelectedSeries(); 
-	    }
+	if (deleted == 0) goto out_here;
 
-	    // have no idea what it does below..
-	    int j = rounds.Count - 1;
-	    while (j >= 0) {
-		if (!rounds[j].hasReadSeries && !rounds[j].hasWriteSeries) {
-		    if (debug) MB.S(rounds[j].customName + " has neither a write nor a read series, deleting it now");
-		    string s = rounds[j].customName;
-		    rounds.RemoveAt(j);
-		    pmgraph.removeDeadXmlDoc(s);
-		} else if (debug) {
-		    MB.S(rounds[j].customName + " still has a series"); 
-		}
-		j--;
+	// then delete benchround's plotpoints objects
+	foreach (var br in rounds) {
+	    if (br.hasPendingDeletions) br.deleteSelectedSeries(); 
+	}
+
+	// now delete round item and Xml doc associated with emptied chart
+	// reverse traverse as we remove from the list
+	for (int i = rounds.Count - 1; i >= 0; i--) {
+	    if (!rounds[i].hasReadSeries && !rounds[i].hasWriteSeries) {
+		string s = rounds[i].customName;
+		pmgraph.removeDeadXmlDoc(s);
+		rounds.RemoveAt(i);
 	    }
 	}
 
-	if (debug) {
-	    string cronytest = "";
-	    foreach (var r in rounds) {
-		cronytest += r.customName + " has " + 
-		    (r.hasReadSeries && r.hasWriteSeries ? "both" : 
-		     (r.hasReadSeries ? "read" : 
-		      (r.hasWriteSeries ? "write" : ""))) + "\n";
-	    }
-	    MB.S("Done deleting, pivot now has " 
-		    + rounds.Count + " rounds:\n" + cronytest);
-	}
-
+out_here:
 	thePivotChart.refreshSelectionColors();
 	return deleted;
-    }
-
-    public int markDeleteSelected(bool nag)
-    {
-	return thePivotChart.deleteFlagSelected(nag);
     }
 
     public bool setFull(bool b)
@@ -2260,7 +2286,7 @@ public class Harness
 	return showFull;
     }
 
-    // this constructor is for embedded 'manual' 
+    // this constructor is for embedded 'manual'
     public Harness(PmGraph pmg)
     {
 	thePivotChart = null;
@@ -2285,32 +2311,49 @@ public class Harness
 	pmgraph = pmg;
     }
 
-    public string getPivotDumpHeader(int i)
+    public void addNewBenchrounds(List<BenchRound> brs)
     {
-	return CsvWriter.getPivotDumpHeader(i, this);
-    }
+	foreach(var br in brs) {
+	    rounds.Add(br);
 
-    /*
-     * called by getPreparedChart when not populated
-     */
-    private Chart initializePivotChart(int width, int height) 
-    {
-	foreach (var round in rounds) {
-	    round.populateDataChart();
+	    br.populatePlotPoints();
+	    if (br.wasDeletedDontBother) {
+Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
+		continue;
+	    }
+	    thePivotChart.addSeries(br);
 	}
 
+	thePivotChart.resetAllSelection();
+	thePivotChart.refreshSelectionColors();
+    }
+
+    public void addNewBenchround(BenchRound br)
+    {
+	rounds.Add(br);
+
+	br.populatePlotPoints();
+	if (br.wasDeletedDontBother) {
+Console.WriteLine("addNewBenchround: wasDeletedDontBother");
+	} else {
+	    thePivotChart.addSeries(br);
+	}
+
+	thePivotChart.resetAllSelection();
+	thePivotChart.refreshSelectionColors();
+    }
+
+    private Chart initializePivotChart(int width, int height) 
+    {
 	// this PivotChart is for display
 	thePivotChart = new PivotChart(this, width, height);
 
-	for (int i = 0; i < rounds.Count; i++) {
-	    if (rounds[i].wasDeletedDontBother) continue;
+	foreach (var br in rounds) {
+	    br.populatePlotPoints();
 
-	    if (rounds[i].ratio() > 0) {
-		thePivotChart.addSeries(rounds[i], AccessType.read, i);
-	    }
-	    if (rounds[i].ratio() < 100) {
-		thePivotChart.addSeries(rounds[i], AccessType.write, i);
-	    }
+	    if (br.wasDeletedDontBother) continue;
+
+	    thePivotChart.addSeries(br);
 	}
 
 	thePivotChart.createHoverSeries();
@@ -2320,14 +2363,14 @@ public class Harness
 
 	chartReady = (thePivotChart.currentChart != null);
 	if (!chartReady) {
-	    MB.S("initPivotChart(" + width + ", " 
-		    + height + ") error: pivot chart is NOT ready.");
+	    MB.S("initPivotChart(" + width + ", " + height + 
+		    ") error: pivot chart is NOT ready.");
 	}
 	return thePivotChart.currentChart;
     }
 
     /*
-     * called by PmGraph.graphManual()
+     * called by PmGraph.redrawManual()
      */
     public Chart getNewChart(int w, int h)
     {
@@ -2347,7 +2390,7 @@ public class Harness
     }
 
     /*
-     * called by PmGraph.graphManual()
+     * called by PmGraph.redrawManual()
      */
     public void destroyPivotChart()
     {
@@ -2371,11 +2414,12 @@ Console.WriteLine("destroyPivotChart() pivot chart disposed");
     }
 
     /*
-     * called when export CSV button clicked
+     * called when export CSV button clicked and other automated paths
      */
     public int dumpPivotCsv(string folder)
     {
-	return CsvWriter.writePivotCsvDump(folder, this, ref this.outfile);
+	var foo = new CsvWriter();
+	return foo.writePivotCsvDump(folder, this);
     }
 
     public int getChartSelectionCount()
@@ -2389,56 +2433,5 @@ Console.WriteLine("destroyPivotChart() pivot chart disposed");
 } // namespace PmGraphSpace
 
 
-
-
-
-
-/* graveyard
- 
-    // this constructor is used for storage only - should never be displayed
-    public PivotChart(XmlNode node)
-    {
-Console.WriteLine("PivotChart() constructor - storage only");
-	allSeries = new Dictionary<string, BetterSeries>();
-	partnerSeries = new Dictionary<string, BetterSeries>();
-	hoverSeries = null;
-	randomColorState = new Random(int.Parse("0ddfaced", System.Globalization.NumberStyles.HexNumber));
-	flaggedForDeletion = new List<string>();
-	selectionCount = 0;
-
-	for (int i = 0; i < 2; i++) {
-	    Chart chart = new Chart();
-	    ChartArea sumCount = new ChartArea();
-	    // current chart measures individual hex buckets, not sum_count, 
-	    // but I don't feel like changing it
-	    sumCount.Name = "sum_count"; 
-	    sumCount.AxisX.ScaleView.Zoomable = true;
-	    sumCount.AxisY.ScaleView.Zoomable = true;
-	    sumCount.AxisY.Title = "Sample count";
-	    sumCount.AxisX.Title = "Latency interval (2^x ns)";
-	    Legend legend1 = new Legend();
-	    legend1.Name = "Legend1";
-	    chart.ChartAreas.Add(sumCount);
-	    chart.Name = "Statistics";
-	    chart.Legends.Add(legend1);
-	    chart.TabIndex = 1;
-	    chart.Text = (i == 1 ? "hex_bins" : "sum_count");
-	    XmlNode stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
-	    XmlToChart.getHisto(chart, stats, AccessType.read, Color.Blue, i == 1);
-	    XmlToChart.getHisto(chart, stats, AccessType.write, Color.Red, i == 1);
-	    stats = null;
-	    switch (i) {
-	    case (0):
-		miniChart = chart;
-		break;
-	    case (1):
-		fullChart = chart;
-		break;
-	    default:
-		MB.S("new pivot chart from xmlnode error: " + i);
-		break;
-	    }
-	}
-    }
-
+/*
     */

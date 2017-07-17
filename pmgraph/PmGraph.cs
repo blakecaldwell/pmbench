@@ -91,8 +91,12 @@ public class ControlPanel : FlowLayoutPanel
      */
     private void testError_click(object sender, EventArgs e)
     {
-	RadioButton rb = getRadioButton(9);
-	Console.WriteLine(rb.ToString());
+	//RadioButton rb = getRadioButton(9);
+	//Console.WriteLine(rb.ToString());
+	
+	//pmgraph.testerror_dumpXmlFilesToConsole();
+	//pmgraph.manual.thePivotChart.testerror_dumpSelectionStatus();
+	pmgraph.manual.thePivotChart.testerror_dumpChartSeries();
     }
 
     private void helpButton_click(object sender, EventArgs e)
@@ -868,7 +872,7 @@ public class PmGraph : Form
     private ControlPanel controlPanel;
     private Chart theChart;	// hold onto the current Chart object
     private Harness auto_oldcode;
-    private Harness manual; // ??? what's the difference?
+    public Harness manual;
 
     private string[] kernelFilenameStrings = { "Fedora23_native", "Fedora23_Xen", "Windows10_native", "Windows10_Xen" };
     private string[] deviceFilenameStrings = { "chatham", "NANDSSD", "RAMDISK" };
@@ -905,6 +909,16 @@ public class PmGraph : Form
 	allHarnesses = new Dictionary<string, Harness>();
 
 	manual = new Harness(this);
+
+	// initialize pivotchart
+	Chart newchart = manual.getNewChart(getChartWidth(), getChartHeight());
+
+	if (newchart == null) MB.S("null chart returned");
+	attachChart(newchart);
+	
+	// what are these?
+	auto_oldcode = manual;
+	controlPanel.setControlsEnabled_dummy();
     }
 
     public void dropSelectionChanged_action(object o, EventArgs args)
@@ -1090,7 +1104,7 @@ public class PmGraph : Form
     {
 	string dirtybenches = "";
 //       Dictionary<string, string> rewrites = new Dictionary<string, string>();
-	BenchSiblings bs = null;
+	BenchSiblings bench = null;
 	for (int j = 0; j < controlPanel.dropKernel.Items.Count; j++) //0
 	{
 	    if (j == 3) continue;
@@ -1125,15 +1139,15 @@ public class PmGraph : Form
 					    return "";
 					}
 					//controlPanel.setDropMenuSelected(7, s);
-					bs = getBenchSiblingsObjectFromKeyAndKey(controlPanel.getKey1FromDropdowns(), controlPanel.getKey2FromDropdowns());
-					if (bs == null) { continue; }
+					bench = getBenchSiblingsObjectFromKeyAndKey(controlPanel.getKey1FromDropdowns(), controlPanel.getKey2FromDropdowns());
+					if (bench == null) { continue; }
 					totalValidated++;
 					/*if (false)
 					{
 					    failedValidation++;
-					    dirtybenches += bs.benchParams.printReadableParams() + "\n";
+					    dirtybenches += bench.benchParams.printReadableParams() + "\n";
 					}*/
-					bs = null;
+					bench = null;
 				    //} // nice
 				} // ratio
 			    } // delay
@@ -1242,6 +1256,15 @@ public class PmGraph : Form
 	return files;
     }
 
+    public void testerror_dumpXmlFilesToConsole()
+    {
+	Console.WriteLine("Dumping keys in xmlFiles (count = {0})",
+		xmlFiles.Count);
+	foreach(string key in xmlFiles.Keys) {
+	    Console.WriteLine(key);
+	}
+    }
+
     private XmlDocument getDocFromKey(string key)
     {
 	try {
@@ -1265,10 +1288,10 @@ public class PmGraph : Form
 	}
     }
 
-    private Harness makeHarness(BenchSiblings bs, int ri)
+    private Harness makeHarness(BenchSiblings bench, int ri)
     {
 	if (controlPanel.radioIndex == 8) {
-	    return new Harness(bs.benchParams, ri, bs.Trials, this);
+	    return new Harness(bench.benchParams, ri, bench.Trials, this);
 	} else {
 	    BenchSiblings b;
 	    List<BenchRound> brs = new List<BenchRound>();
@@ -1280,16 +1303,16 @@ public class PmGraph : Form
 		}
 	    }
 	    b = null;
-	    return new Harness(bs.benchParams, ri, brs, this);
+	    return new Harness(bench.benchParams, ri, brs, this);
 	}
     }
 
     private BenchSiblings getBenchSiblingsObjectFromKeyAndKey(string key1, string key2)
     {
-	BenchSiblings bs = null;
+	BenchSiblings bench = null;
 
 	try {
-	    bs = allBenchSiblings[key1 + "_" + key2];
+	    bench = allBenchSiblings[key1 + "_" + key2];
 	}
 	catch (KeyNotFoundException) {
 	    XmlDocument doc = getDocFromKey(key1);
@@ -1309,12 +1332,12 @@ public class PmGraph : Form
 		bp.swapDevice = controlPanel.getKey1Value(1, int.Parse(splat[1]));
 		bp.valueMemory = int.Parse(controlPanel.getKey1Value(2, int.Parse(splat[2])));
 		splat = null;
-		bs = new BenchSiblings(sn, doc, bp);
+		bench = new BenchSiblings(sn, doc, bp);
 		sn = null;
 	    }
-	    allBenchSiblings[key1 + "_" + key2] = bs; //removing this causes duplicates
+	    allBenchSiblings[key1 + "_" + key2] = bench; //removing this causes duplicates
 	}
-	return bs;
+	return bench;
     }
 
     private Harness getHarnessFromKey(string s)
@@ -1332,10 +1355,10 @@ public class PmGraph : Form
 	Harness hns = getHarnessFromKey(controlPanel.getPivotKeys(false));
 
 	if (hns == null) {
-	    BenchSiblings bs = getBenchSiblingsObjectFromKeyAndKey(controlPanel.getKey1FromDropdowns(), controlPanel.getKey2FromDropdowns());
-	    if (bs == null) return null;
+	    BenchSiblings bench = getBenchSiblingsObjectFromKeyAndKey(controlPanel.getKey1FromDropdowns(), controlPanel.getKey2FromDropdowns());
+	    if (bench == null) return null;
 
-	    hns = makeHarness(bs, controlPanel.radioIndex);
+	    hns = makeHarness(bench, controlPanel.radioIndex);
 	    allHarnesses[controlPanel.getPivotKeys(false)] = hns;
 	}
 	return hns;
@@ -1524,26 +1547,20 @@ Console.WriteLine("attachChart()");
     }
 
     /*
-     * this basically remove/recreate/reattach chart.. quite heavy
+     * Hard redraw - basically remove/recreate/reattach chart..
      */
-    private void graphManual()
+    private void redrawManual()
     {
-Console.WriteLine("graphManual entered");
-
-	// detach
 	detachChart();
 
-	// dispose
-	manual.destroyPivotChart(); //forgot why this is necessary
+	manual.destroyPivotChart();
 
-	// recreate chart
 	Chart newchart = manual.getNewChart(
 		getChartWidth(),
 		getChartHeight());
 
-	if (newchart == null) MB.S("graphManual: null chart returned");
+	if (newchart == null) MB.S("redrawManual: null chart returned");
 
-	// reattach
 	attachChart(newchart);
 
 	// what are these?
@@ -1551,23 +1568,14 @@ Console.WriteLine("graphManual entered");
 	controlPanel.setControlsEnabled_dummy();
     }
 
-    private void addSeriesAverageToManual(BenchSiblings addme)
-    {
-	//XXX fix this ugly conditional for baseParam
-	if (manual.baseParams == null) {
-	    manual.baseParams = addme.benchParams;
-	}
-	manual.rounds.Add(addme.averageRound);
-Console.WriteLine("addSeriesAverageToManual");
-    }
-
     /*
      * called when import dialog is OKed. Called by controlPanel
      */
     public void importSingle(string[] filenames)
     {
-	foreach (string fpath in filenames)
-	{
+	List<BenchRound> brs = new List<BenchRound>();
+
+	foreach (string fpath in filenames) {
 	    XmlDocument doc = new XmlDocument();
 	    XmlNode fakeSeries = doc.CreateNode(XmlNodeType.Element,
 		    "test_nice", doc.NamespaceURI);
@@ -1583,6 +1591,7 @@ Console.WriteLine("addSeriesAverageToManual");
 	    XmlAttribute iter = doc.CreateAttribute("iter");
 	    iter.Value = ("1").ToString();
 	    fakeRound.Attributes.Append(iter);
+
 	    fakeRound.AppendChild(doc.ImportNode(
 			SafeXmlParse.selNode(tempdoc, "pmbenchmark"), true));
 	    fakeSeries.AppendChild(fakeRound);
@@ -1591,33 +1600,37 @@ Console.WriteLine("addSeriesAverageToManual");
 	    ps.operatingSystem = SafeXmlParse.selNode(tempdoc, 
 		    "pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
 
-	    BenchSiblings bs = new BenchSiblings(fakeSeries, doc, ps);
+	    BenchSiblings bench = new BenchSiblings(fakeSeries, doc, ps);
 	    string fname = Path.GetFileNameWithoutExtension(fpath);
-	    bs.averageRound.customName = registerXmlDocName(fname, doc);
+	    bench.averageRound.customName = registerXmlDocName(fname, doc);
 
-Console.WriteLine("importSingle():" + fpath); 
-	    addSeriesAverageToManual(bs);
+	    //XXX fix this! moved from addSeriesAverageToManual()
+	    if (manual.baseParams == null) {
+		manual.baseParams = bench.benchParams;
+	    }
+	    brs.Add(bench.averageRound);
 	}
-	graphManual();
+
+	manual.addNewBenchrounds(brs);
     }
 
     private int averageCounter = 0;
     public void averageSelectedButton_click(object sender, EventArgs e)
     {
-	//BenchSiblings bs = auto_oldcode.averageSelected(averageCounter++);
-	BenchSiblings bs = manual.averageSelected(averageCounter++);
-Console.WriteLine("averageSelectedButton_click");
-	addSeriesAverageToManual(bs);
+	//BenchSiblings bench = auto_oldcode.averageSelected(averageCounter++);
+	BenchSiblings bench = manual.averageSelected(averageCounter++);
 
-	graphManual(); // should this be just refresh?
-	//theChart.Refresh(); 
+	registerXmlDocName(bench.averageRound.customName, bench.theDoc);
+
+	// below 'if' can go??
+	if (manual.baseParams == null) manual.baseParams = bench.benchParams;
+
+	manual.addNewBenchround(bench.averageRound);
     }
 
-    private bool nag = true;
     public void deleteSelectedButton_click(object sender, EventArgs e)
     {
-	auto_oldcode.markDeleteSelected(nag);
-	auto_oldcode.deleteSelected(nag);
+	manual.deleteSelected();
     }
 
     public void exportCsvManual_click(object sender, EventArgs e)
@@ -1647,42 +1660,6 @@ Console.WriteLine("averageSelectedButton_click");
 }
 
 
-
-
-
 } // namespace PmGraphSpace
 
 //delete single on right click context menu
-
-
-/* graveyard
- 
-    public void getAverageRoundForManualPivot()
-    {
-	BenchSiblings bs = getBenchSiblingsObjectFromKeyAndKey(
-		    controlPanel.getKey1FromDropdowns(),
-		    controlPanel.getKey2FromDropdowns());
-
-	if (bs == null) {
-	    MB.S("Error");
-	    return;
-	}
-Console.WriteLine("getAverageRoundForManualPivot");
-	addSeriesAverageToManual(bs);
-	graphManual();
-    }
-
-    private static string[] splitString(string s, char c)
-    {
-	char[] delimiter = { c };
-	return s.Split(delimiter);
-    }
-
-
-*/
-    /*public string setFieldText(string s)
-    {
-	if (s == null) controlPanel.nameAveragesField.Text = "";
-	else controlPanel.nameAveragesField.Text += s;
-	return controlPanel.nameAveragesField.Text;
-    }*/

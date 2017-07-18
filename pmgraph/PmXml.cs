@@ -1066,7 +1066,7 @@ public class CsvWriter
 	}
     }
 
-    private void writePivotHistogramList(List<XmlNode> nodes, bool showFull)
+    private void writePivotHistogramList(List<XmlNode> nodes, bool useFull)
     {
 	XmlNodeList[] bucket0s = new XmlNodeList[nodes.Count];
 	outfile.Write("0,256,");
@@ -1095,7 +1095,7 @@ public class CsvWriter
 	}
 
 	for (int i = 1; i < 16; i++) { //buckets with indexes 1-15
-	    if (showFull) {
+	    if (useFull) {
 		writeFullBucket(nodes, i);
 	    } else {
 		XmlNode[] buckets = new XmlNode[nodes.Count];
@@ -1217,7 +1217,7 @@ public class CsvWriter
 	    }
 	    outfile.Write("\n");
 	    //MB.S("Writing histograms for " + histos.Count + " histograms");
-	    writePivotHistogramList(histos, hn.showFull);
+	    writePivotHistogramList(histos, true);
 	    histos.Clear();
 	}
 
@@ -1234,7 +1234,7 @@ public class CsvWriter
 		}
 	    }
 	    outfile.Write("\n");
-	    writePivotHistogramList(histos, hn.showFull);
+	    writePivotHistogramList(histos, true);
 	    histos.Clear();
 	}
 	histos = null;
@@ -1482,22 +1482,23 @@ public class PlotPoints
 ///////////
 public class PivotChart
 {
-    // Contains and controls two Series for the same dataset.
+    // Contains and controls three Series for the same dataset.
+    // keeps track of mouse selection status
     // oldname: BetterSeries
-    private class BiSeries
+    private class Binder
     {
-	protected Series miniSeries, fullSeries;
-	protected Series currentSeries;
-	protected bool showFull { set; get; }
-	private string seriesName;
+	public Series miniSeries, fullSeries, logSeries;
+	public string seriesName;
+	public Access myAccessType;
+
+	public Color activeColor;
+
+	public static Color unselectedColor = Color.FromArgb(32, 32, 32, 32);
 
 	public bool selected { set; get;}
 	public bool grayed { set; get;}
 
-	public Color activeColor;
-	static Color unselectedColor = Color.FromArgb(32, 32, 32, 32);
-	public BenchRound theBenchRound { set; get; }
-	private Access myAccessType;
+	public BenchRound theBenchRound;
 
 	public void updateSelectionColor(int sel)
 	{
@@ -1526,7 +1527,7 @@ public class PivotChart
 	/*
 	 * this blows up and frees all series data 
 	 */
-	public string finalizeDeletion(Chart mini, Chart full)
+	public string finalizeDeletion(Chart mini, Chart full, Chart log)
 	{
 	    mini.Series.Remove(miniSeries);
 	    miniSeries.Dispose();
@@ -1536,7 +1537,10 @@ public class PivotChart
 	    fullSeries.Dispose();
 	    fullSeries = null;
 
-	    currentSeries = null;
+	    log.Series.Remove(logSeries);
+	    logSeries.Dispose();
+	    logSeries = null;
+
 	    selected = false;
 	    grayed = false;
 
@@ -1555,77 +1559,38 @@ public class PivotChart
 	    } else if (currently > 1) {
 		updateSelectionColor(currently - 1);
 	    }
-	    return (selected ? 1 : -1);
-	}
-
-	public bool setFull(bool b)
-	{
-	    showFull = b;
-	    currentSeries = (showFull ? fullSeries : miniSeries);
-	    return showFull;
+	    return selected ? 1 : -1;
 	}
 
 	public void setSeriesEnabled(bool set)
 	{
-	    miniSeries.Enabled = set;
-	    fullSeries.Enabled = set;
+	    // only set when different
+	    // this is critical to graphics performance
+	    if (fullSeries.Enabled != set) {
+		miniSeries.Enabled = set;
+		fullSeries.Enabled = set;
+		logSeries.Enabled = set;
+	    }
 	}
-
-	public string getSeriesName()
-	{
-	    if (currentSeries == null) return seriesName;
-	    return currentSeries.Name;
-	}
-
 
 	public Color setColor(Color c)
 	{
 	    miniSeries.Color = c;
 	    fullSeries.Color = c;
+	    logSeries.Color = c;
 	    return c;
 	}
 
-	public BiSeries()
+	public Binder()
 	{
-	    miniSeries = null;
-	    fullSeries = null;
-	    currentSeries = null;
-	    seriesName = null;
-	    selected = false;
-	    activeColor = unselectedColor;
-	    grayed = false;
 	    myAccessType = Access.uninitialized;
-	}
-
-	public Series setContainedSeries(Series series,
-		DetailLevel detail, Access type)
-	{
-	    switch (detail) {
-	    case DetailLevel.full:
-		if (fullSeries == null) fullSeries = series;
-		else MB.S("setContainedSeries: full series is already set");
-		break;
-	    case DetailLevel.mini:
-		if (miniSeries == null) miniSeries = series;
-		else MB.S("setContainedSeries: mini series is already set");
-		break;
-	    default:
-		MB.S("setContainedSeries: error");
-		return series;
-	    }
-
-	    if (seriesName == null) {
-		seriesName = series.Name;
-		myAccessType = type;
-	    }
-	    return series;
+	    selected = false;
+	    grayed = false;
+	    activeColor = unselectedColor;
 	}
     }
 
-    /*
-     * I don't know why this is necessary..
-     */
-    private class HoverSeries : BiSeries
+    private class Hover : Binder
     {
 	private Series lastDrawn;
 
@@ -1637,48 +1602,57 @@ public class PivotChart
 	    return s;
 	}
 
-	public HoverSeries(PivotChart pivotchart)
+	public Hover(PivotChart pivotchart)
 	{
-	    string hts = "hover_short", htf = "hover_full";
+	    string name = "hover";
 	    lastDrawn = null;
 
-	    pivotchart.miniChart.Series.Add(hts);
-	    miniSeries = initializeHoverSeries(pivotchart.miniChart.Series.FindByName(hts));
+	    pivotchart.miniChart.Series.Add(name);
+	    miniSeries = initializeHoverSeries(pivotchart.miniChart.Series.FindByName(name));
 
-	    pivotchart.fullChart.Series.Add(htf);
-	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series.FindByName(htf));
+	    pivotchart.fullChart.Series.Add(name);
+	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series.FindByName(name));
+
+	    pivotchart.logChart.Series.Add(name);
+	    logSeries = initializeHoverSeries(pivotchart.logChart.Series.FindByName(name));
+	    seriesName = name;
 	}
 
+	/*
+	 * called by mouse hover event handler
+	 */
 	public void updateHoverSeries(Series s, Chart ch)
 	{
 	    if (s == null) return;
 
 	    if (ReferenceEquals(lastDrawn, s)) return;
+
 	    setColor(s.Color);
 
 	    // redrawing by copying data series is expensive.. but..
-	    ch.Series[getSeriesName()].Points.Clear();
-	    ch.DataManipulator.CopySeriesValues(s.Name, getSeriesName());
+
+	    ch.Series[seriesName].Points.Clear();
+	    ch.DataManipulator.CopySeriesValues(s.Name, seriesName);
 
 	    lastDrawn = s;
 	}
     }
 
-    private Chart miniChart, fullChart;
-    public Chart currentChart;	//mini or full toggle
-    private HoverSeries hoverSeries;
-    private Harness harness;
-    private bool showFull { set; get; }
+    private Chart miniChart, fullChart, logChart;
+    public Chart currentChart;	//mini, full, or log
+
     private Random randomColorState;
 
-    private Dictionary<string, BiSeries> allSeries;
     private int selectionCount;
-    private Dictionary<string, BiSeries> partnerSeries;
+    private Hover hover;
+    private Dictionary<string, Binder> allSeries;
+    private Dictionary<string, Binder> partnerSeries;
 
+    private Harness harness;	// back pointer
 
     public void testerror_dumpSelectionStatus()
     {
-	Console.WriteLine("PovitChart::dumpSelectionStatus()");
+	Console.WriteLine("PivotChart::dumpSelectionStatus()");
 	Console.WriteLine(" selectionCount:{0}", selectionCount);
 	Console.WriteLine(" allSeries.Count:{0}", allSeries.Count);
 	var iter = allSeries.Values.GetEnumerator();
@@ -1691,7 +1665,7 @@ public class PivotChart
 
     public void testerror_dumpChartSeries()
     {
-	Console.WriteLine("PovitChart::dumpChartSeries()");
+	Console.WriteLine("PivotChart::dumpChartSeries()");
 
 	Console.WriteLine(" allSeries.Count:{0}", allSeries.Count);
 	var iter = allSeries.Keys.GetEnumerator();
@@ -1723,6 +1697,15 @@ public class PivotChart
 	while (iter_fu.MoveNext()) {
 	    Console.WriteLine("  item {0}:name={1}", 
 		    i++, iter_fu.Current.Name);
+	}
+
+	Console.WriteLine(" logChart.Series.Count:{0}", 
+		logChart.Series.Count);
+	var iter_lo = logChart.Series.GetEnumerator();
+	i = 0;
+	while (iter_lo.MoveNext()) {
+	    Console.WriteLine("  item {0}:name={1}", 
+		    i++, iter_lo.Current.Name);
 	}
 
     }
@@ -1763,10 +1746,10 @@ public class PivotChart
 	if (count == 0) return 0;
 
 	foreach (var name in deletionList) {
-	    BiSeries bs = allSeries[name];
+	    Binder bs = allSeries[name];
 	    allSeries.Remove(name);
 	    partnerSeries.Remove(name);	// no exception even if not found
-	    bs.finalizeDeletion(miniChart, fullChart);
+	    bs.finalizeDeletion(miniChart, fullChart, logChart);
 	}
 
 	return count;
@@ -1774,17 +1757,17 @@ public class PivotChart
 
     public PivotChart(Harness hn, int width, int height)
     {
-	allSeries = new Dictionary<string, BiSeries>();
-	partnerSeries = new Dictionary<string, BiSeries>();
+	allSeries = new Dictionary<string, Binder>();
+	partnerSeries = new Dictionary<string, Binder>();
 
-	hoverSeries = null;
+	hover = null;
 	randomColorState = new Random(int.Parse("0ddfaced", 
 		    System.Globalization.NumberStyles.HexNumber));
 	selectionCount = 0;
 
 	harness = hn;
 
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < 3; i++) {
 	    string s = null;
 	    Chart chart = new Chart();
 	    ChartArea histogram = new ChartArea();
@@ -1821,45 +1804,36 @@ public class PivotChart
 	    case (1):
 		fullChart = chart;
 		break;
-	    default:
-		MB.S("New pivot chart error: " + i);
+	    case (2):
+		logChart = chart;
+		histogram.AxisY.IsLogarithmic = true;
 		break;
 	    }
 	}
     }
 
-    public bool setFull(bool b)
+    public void setCurrentToFull()
     {
-	showFull = hoverSeries.setFull(b);
-	currentChart = (showFull ? fullChart : miniChart);
-
-	return showFull;
+	currentChart = fullChart;
+    }
+    public void setCurrentToMini()
+    {
+	currentChart = miniChart;
+    }
+    public void setCurrentToLog()
+    {
+	currentChart = logChart;
     }
 
     public void createHoverSeries()
     {
-	if (hoverSeries != null) {
+	if (hover != null) {
 Console.WriteLine("createHoverSeries(): already exists");
 	    return;
 	}
-	hoverSeries = new HoverSeries(this);
+	hover = new Hover(this);
 
-	hoverSeries.setSeriesEnabled(true);
-    }
-
-    /*
-     * called by mouse hover event handler
-     */
-    private void updateHoverSeries(Series s)
-    {
-	if (s == null) return;
-
-	hoverSeries.setColor(s.Color);
-
-	// redrawing by copying data series is expensive.. but..
-	currentChart.Series[hoverSeries.getSeriesName()].Points.Clear();
-	currentChart.DataManipulator.CopySeriesValues(s.Name, hoverSeries.getSeriesName());
-
+	hover.setSeriesEnabled(true);
     }
 
     private static HitTestResult getHitTestResult( Chart c, Point mousepos)
@@ -1877,7 +1851,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 	Chart chart = sender as Chart;
 	if (!chart.Focused) chart.Focus();
 
-	hoverSeries.setSeriesEnabled(true);
+	hover.setSeriesEnabled(true);
     }
 
     private void chartMouseLeave(object sender, EventArgs e)
@@ -1885,7 +1859,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 	Chart chart = sender as Chart;
 	if (chart.Focused) chart.Parent.Focus();
 
-	hoverSeries.setSeriesEnabled(false);
+	hover.setSeriesEnabled(false);
     }
 
     public void chartMouseHover(object sender, EventArgs args)
@@ -1904,11 +1878,14 @@ Console.WriteLine("createHoverSeries(): already exists");
 	 //   }
 
 	    //s.BorderWidth = 4;
-	    hoverSeries.updateHoverSeries(s, currentChart);
-	} 
+	    hover.updateHoverSeries(s, currentChart);
+	    hover.setSeriesEnabled(true);
+	} else {
+	    hover.setSeriesEnabled(false);
+	}
     }
 
-    private void toggleSelection(BiSeries bs)
+    private void toggleSelection(Binder bs)
     {
 	selectionCount += bs.toggleSelected(selectionCount);
     }
@@ -1970,11 +1947,11 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    allSeries[li.SeriesName].theBenchRound.seriesObject.displaySpikes();
 	    break;
 	case (MouseButtons.Left):
-	    BiSeries bs_a = allSeries[li.SeriesName];
+	    Binder bs_a = allSeries[li.SeriesName];
 	    toggleSelection(bs_a); 
 
-	    BiSeries bs_b;
-	    if (partnerSeries.TryGetValue(bs_a.getSeriesName(), out bs_b)) {
+	    Binder bs_b;
+	    if (partnerSeries.TryGetValue(bs_a.seriesName, out bs_b)) {
 		toggleSelection(bs_b);
 	    }
 
@@ -2056,6 +2033,21 @@ Console.WriteLine("createHoverSeries(): already exists");
     }
 
     /*
+     * Log chart doesn't allow zero.
+     * so we change 0 to 1 for log display.
+     * This is for disply only, and we use real data for csv output
+     */
+    private static void massageDataPoints(Series series)
+    {
+	// now insert the points to new series one by one
+	foreach(var datapoint in series.Points) {
+	    if (datapoint.YValues[0] == 0.0) {
+		datapoint.YValues[0] = 1.0;
+	    }
+	}
+    }
+
+    /*
      * rewrite of produce Series from BenchRound using options.
      * it populates internal objects along the way.
      * (old name: collectDataPoints()) 
@@ -2084,34 +2076,40 @@ Console.WriteLine("createHoverSeries(): already exists");
 	return series;
     }
 
-    /*
-     * called by Harness::initializePivotChart
-     */
     public void addSeries(BenchRound br)
     {
 	Series series;
-	BiSeries bs;
+	Binder bs;
 	Color color;
 
 	if (br.ratio() > 0) {	// read data exist
-	    bs = new BiSeries();
+	    bs = new Binder();
 	    bs.theBenchRound = br;
 	    color = getColor(734, Access.read);
 
 	    // add mini series
 	    series = produceSeries(br, DetailLevel.mini, Access.read);
-	    bs.setContainedSeries(series, DetailLevel.mini, Access.read);
+	    bs.miniSeries = series;
 	    miniChart.Series.Add(series);
 
 	    // add full series
 	    series = produceSeries(br, DetailLevel.full, Access.read);
-	    bs.setContainedSeries(series, DetailLevel.full, Access.read);
+	    bs.fullSeries = series;
 	    fullChart.Series.Add(series);
 
-	    allSeries[series.Name] = bs;
+	    // add log series
+	    series = produceSeries(br, DetailLevel.full, Access.read);
+	    massageDataPoints(series); // zero to 1 for log drawing
+	    bs.logSeries = series;
+	    logChart.Series.Add(series);
+
+	    bs.seriesName = series.Name;
+	    bs.myAccessType = Access.read;
 	    bs.activeColor = color;
 	    bs.setColor(bs.activeColor);
 	    
+	    allSeries[series.Name] = bs;
+
 	    // populating partnerSeries information
 	    if (br.ratio() >= 100) {
 		; // don't have partner series..
@@ -2123,24 +2121,32 @@ Console.WriteLine("createHoverSeries(): already exists");
 	}
 
 	if (br.ratio() < 100) {  // write data exist
-	    bs = new BiSeries();
+	    bs = new Binder();
 	    bs.theBenchRound = br;
 	    color = getColor(734, Access.write);
 
 	    // add mini series
 	    series = produceSeries(br, DetailLevel.mini, Access.write);
-	    bs.setContainedSeries(series, DetailLevel.mini, Access.write);
+	    bs.miniSeries = series;
 	    miniChart.Series.Add(series);
 	    
 	    // add full series
 	    series = produceSeries(br, DetailLevel.full, Access.write);
-	    bs.setContainedSeries(series, DetailLevel.full, Access.write);
+	    bs.fullSeries = series;
 	    fullChart.Series.Add(series);
+	    
+	    // add log series
+	    series = produceSeries(br, DetailLevel.full, Access.write);
+	    massageDataPoints(series); // zero to 1 for log drawing
+	    bs.logSeries = series;
+	    logChart.Series.Add(series);
 
-	    allSeries[series.Name] = bs;
+	    bs.seriesName = series.Name;
+	    bs.myAccessType = Access.write;
 	    bs.activeColor = color;
 	    bs.setColor(bs.activeColor);
 	    
+	    allSeries[series.Name] = bs;
 	    // populating partnerSeries information
 	    if (br.ratio() <= 0) {
 		; // don't have partner series..
@@ -2150,6 +2156,23 @@ Console.WriteLine("createHoverSeries(): already exists");
 		partnerSeries.Add(pname, bs);
 	    }
 	}
+    }
+    /*
+     * call this after adding series to bump hover series to front
+     */
+    public void bumpHoverSeries()
+    {
+	// bring the series to the front to highlight
+	Series s; 
+	s = hover.miniSeries;
+	miniChart.Series.Remove(s);
+	miniChart.Series.Add(s);
+	s = hover.fullSeries;
+	fullChart.Series.Remove(s);
+	fullChart.Series.Add(s);
+	s = hover.logSeries;
+	logChart.Series.Remove(s);
+	logChart.Series.Add(s);
     }
 
 }   // PivotChart
@@ -2166,10 +2189,8 @@ public class Harness
     public ParamSet baseParams;
     public List<BenchRound> rounds;
     public PivotChart thePivotChart; // turn back to private after debug
-    private bool chartReady;
     public PmGraph pmgraph;
     public bool dumped = false;
-    public bool showFull { set; get; }
 
     public void selectAll()
     {
@@ -2280,23 +2301,17 @@ out_here:
 	return deleted;
     }
 
-    public bool setFull(bool b)
-    {
-	showFull = thePivotChart.setFull(b);
-	return showFull;
-    }
-
     // this constructor is for embedded 'manual'
     public Harness(PmGraph pmg)
     {
 	thePivotChart = null;
-	chartReady = false;
 	baseParams = null;
 	pivotIndex = 9;
 	rounds = new List<BenchRound>(); // empty initially.
 	pmgraph = pmg;
     }
 
+    // this constructor is for old mess
     public Harness(
 	    ParamSet ps,
 	    int pivotindex,
@@ -2304,7 +2319,6 @@ out_here:
 	    PmGraph pmg)
     {
 	thePivotChart = null;
-	chartReady = false;
 	baseParams = ps;
 	pivotIndex = pivotindex;
 	rounds = br;
@@ -2324,23 +2338,31 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
 	    thePivotChart.addSeries(br);
 	}
 
+	thePivotChart.bumpHoverSeries();
 	thePivotChart.resetAllSelection();
 	thePivotChart.refreshSelectionColors();
     }
 
-    public void addNewBenchround(BenchRound br)
+    public Chart switchToChart(string name)
     {
-	rounds.Add(br);
-
-	br.populatePlotPoints();
-	if (br.wasDeletedDontBother) {
-Console.WriteLine("addNewBenchround: wasDeletedDontBother");
-	} else {
-	    thePivotChart.addSeries(br);
+	switch(name) {
+	case "mini":
+	    thePivotChart.setCurrentToMini();
+	    break;
+	case "full":
+	    thePivotChart.setCurrentToFull();
+	    break;
+	case "log":
+	    thePivotChart.setCurrentToLog();
+	    break;
+	default:
+	    MB.S("switchToChart: unrecognized chart name");
+	    thePivotChart.setCurrentToFull();
+	    break;
 	}
 
-	thePivotChart.resetAllSelection();
-	thePivotChart.refreshSelectionColors();
+	return thePivotChart.currentChart;
+
     }
 
     private Chart initializePivotChart(int width, int height) 
@@ -2358,14 +2380,8 @@ Console.WriteLine("addNewBenchround: wasDeletedDontBother");
 
 	thePivotChart.createHoverSeries();
 
-	//setFull(full_checkbox.Checked);
-	setFull(true);
+	thePivotChart.setCurrentToFull();
 
-	chartReady = (thePivotChart.currentChart != null);
-	if (!chartReady) {
-	    MB.S("initPivotChart(" + width + ", " + height + 
-		    ") error: pivot chart is NOT ready.");
-	}
 	return thePivotChart.currentChart;
     }
 
@@ -2374,8 +2390,6 @@ Console.WriteLine("addNewBenchround: wasDeletedDontBother");
      */
     public Chart getNewChart(int w, int h)
     {
-	if (chartReady) MB.S("getNewChart: Error: chartReady is true");
-	
 	return initializePivotChart(w, h);
     }
 
@@ -2384,8 +2398,6 @@ Console.WriteLine("addNewBenchround: wasDeletedDontBother");
      */
     public Chart getPreparedChart()
     {
-	if (!chartReady) MB.S("getPreparedChart: Error: chartReady is false");
-
 	return thePivotChart.getChart(DetailLevel.currenttype);
     }
 
@@ -2395,22 +2407,15 @@ Console.WriteLine("addNewBenchround: wasDeletedDontBother");
     public void destroyPivotChart()
     {
 	if (thePivotChart == null) {
-Console.WriteLine("destroyPivotChart() - already null");
 	    return;
 	}
 
-	if (chartReady) {
-	    if (thePivotChart.currentChart == null) {
-		MB.S("destroyPovitChart: Chart already destroyed");
-		return;
-	    }
-	    thePivotChart.currentChart.Dispose();
-	    thePivotChart.currentChart = null;
-	    chartReady = false;
-Console.WriteLine("destroyPivotChart() pivot chart disposed");
-	} else {
-	    MB.S("destroyPivotChart info: Chart is not ready");
+	if (thePivotChart.currentChart == null) {
+	    MB.S("destroyPivotChart: Chart already destroyed");
+	    return;
 	}
+	thePivotChart.currentChart.Dispose();
+	thePivotChart.currentChart = null;
     }
 
     /*

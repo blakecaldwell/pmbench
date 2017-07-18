@@ -49,7 +49,6 @@ public class ControlPanel : FlowLayoutPanel
 
     enum Knobs { Kernel = 0, Device, Memory, Mapsize, Jobs, Delay, Ratio }; 
     private RadioButton[] radioSelect;
-    private Label[] labelSelect;
     private ComboBox[] comboSelect;
 
     public RadioButton radioSelected, radioNone; // used by PmGraph
@@ -63,16 +62,15 @@ public class ControlPanel : FlowLayoutPanel
     private int tempKernelIndex, tempDeviceIndex, tempMemoryIndex, tempMapsizeIndex, tempJobsIndex, tempDelayIndex, tempRatioIndex, tempRadioIndex;
 
     private bool tempAutoChecked;
-    private static Padding controlPadding = new Padding(0, 6, 0, 0);
-//	private static Padding panelPadding = new Padding(5, 0, 0, 0);
-//	private static Padding actionButtonPadding = new Padding(3, 0, 0, 0);
-    private static Size radioSize = new Size(13, 13);
+    private static Size radioSize = new Size(90, 18);
     private static Size labelSize = new Size(72, 14);
     private CancellationTokenSource cancelSource;
 
     private FlowLayoutPanel loadValidateRow = null, exportRow = null;
 
+    private RadioButton[] selectChart;
     private Panel selectPanel;
+    private Panel chartSelectPanel;
 
     private PmGraph pmgraph;
 
@@ -96,7 +94,11 @@ public class ControlPanel : FlowLayoutPanel
 	
 	//pmgraph.testerror_dumpXmlFilesToConsole();
 	//pmgraph.manual.thePivotChart.testerror_dumpSelectionStatus();
-	pmgraph.manual.thePivotChart.testerror_dumpChartSeries();
+	try {
+	    pmgraph.manual.thePivotChart.testerror_dumpChartSeries();
+	} catch (NullReferenceException) {
+	    Console.WriteLine("Null reference: pmgraph.manual.thePivotChart.testerror_dumpChartSeries()");
+	}
     }
 
     private void helpButton_click(object sender, EventArgs e)
@@ -214,9 +216,46 @@ public class ControlPanel : FlowLayoutPanel
 	return tb;
     }
 
+    private void initSelectionControl_old()
+    {
+	// place all selection controls to select Panel
+	selectPanel = new Panel();
+	selectPanel.BorderStyle = BorderStyle.Fixed3D;
+	selectPanel.Size = new Size(95, 180);
+
+	String[] knobStrs = {
+	    "Kernel", "Device", "Memory", "Mapsize", 
+	    "Jobs", "Delay", "Ratio" };
+	String[] labelStrs = {
+	    "OS/Kernel", "Swap device", "Phys mem", "Map size",
+	    "Threads", "Delay", "RW ratio" };
+
+	radioSelect = new RadioButton[7];
+	comboSelect = new ComboBox[7];
+
+	for (int i = 0; i < 7; i++) {
+	    radioSelect[i] = initRadioButton(knobStrs[i], labelStrs[i]);
+	    comboSelect[i] = initDropMenu(
+		new object[] {
+		    "None" }, 
+		    0);
+	    radioSelect[i].Location = new Point(2, i*25 + 3);
+	    comboSelect[i].Location = new Point(92, i*25);
+	}
+
+
+	selectPanel.Controls.AddRange(radioSelect);
+	selectPanel.Controls.AddRange(comboSelect);
+	
+	this.Controls.Add(selectPanel);
+    }
+
     public ControlPanel(PmGraph p)
     {
 	pmgraph = p;
+
+	this.Width = 95;
+	this.Height = pmgraph.Height;
 
 	Padding checkPadding = new Padding(6, 8, 0, 0);
 	Padding checkLabelPadding = new Padding(0, 8, 0, 0); ;
@@ -247,8 +286,6 @@ public class ControlPanel : FlowLayoutPanel
 	radioNone = initRadioButton("None", "test iteration");
 	radioNone.Margin = new Padding(0, 0, 0, 0);
 
-	this.Width = 220;
-	this.Height = pmgraph.Height;
 
 	manualCheck = new CheckBox();
 	manualCheck.Enabled = true;
@@ -284,41 +321,29 @@ public class ControlPanel : FlowLayoutPanel
 	this.Controls.Add(selectAllButton);
 	this.Controls.Add(helpButton);
 
-	
-	// place all selection controls to select Panel
-	selectPanel = new Panel();
-	selectPanel.BorderStyle = BorderStyle.Fixed3D;
-	selectPanel.Size = new Size(220, 180);
+	// initSelectionControl_old();
 
-	String[] knobStrs = {
-	    "Kernel", "Device", "Memory", "Mapsize", 
-	    "Jobs", "Delay", "Ratio" };
-	String[] labelStrs = {
-	    "OS/Kernel", "Swap device", "Phys mem", "Map size",
-	    "Threads", "Delay", "RW ratio" };
+	// chart selection radio button 
+	chartSelectPanel = new Panel();
+	chartSelectPanel.BorderStyle = BorderStyle.Fixed3D;
+	chartSelectPanel.Size = new Size(95, 80);
 
-	radioSelect = new RadioButton[7];
-	labelSelect = new Label[7];
-	comboSelect = new ComboBox[7];
-
-	for (int i = 0; i < 7; i++) {
-	    radioSelect[i] = initRadioButton(knobStrs[i], labelStrs[i]);
-	    labelSelect[i] = initDropLabel(labelStrs[i]);
-	    comboSelect[i] = initDropMenu(
-		new object[] {
-		    "None" }, 
-		    0);
-	    radioSelect[i].Location = new Point(2, i*25 + 3);
-	    labelSelect[i].Location = new Point(17, i*25 + 2);
-	    comboSelect[i].Location = new Point(92, i*25);
+	String[] chtnames = { "mini", "full", "log" };
+	String[] chttexts = { "Mini (linear)", "Full (linear)", "Full (Log)" };
+	bool[] chtchecked = { false, true, false };
+	selectChart = new RadioButton[3];
+	for (int i = 0; i < 3; i++) {
+	    RadioButton rb = new RadioButton();
+	    rb.Name = chtnames[i];
+	    rb.Text = chttexts[i];
+	    rb.Checked = chtchecked[i];
+	    rb.Size = radioSize;
+	    rb.CheckedChanged += new EventHandler(pmgraph.chartchange_click);
+	    rb.Location = new Point(2, i * 25 + 3);
+	    selectChart[i] = rb;
 	}
-
-
-	selectPanel.Controls.AddRange(radioSelect);
-	selectPanel.Controls.AddRange(labelSelect);
-	selectPanel.Controls.AddRange(comboSelect);
-	
-	this.Controls.Add(selectPanel);
+	chartSelectPanel.Controls.AddRange(selectChart);
+	this.Controls.Add(chartSelectPanel);
 
 
 	// old exportButton recovered code
@@ -330,8 +355,8 @@ public class ControlPanel : FlowLayoutPanel
 	this.Controls.Add(exportButtonOld);
 	this.Controls.Add(autoExportButton);
 
-	// testing error case
-	testErrorButton = initButton("testError", 
+	// debug dump button 
+	testErrorButton = initButton("debug dump", 
 		testError_click, true);
 	this.Controls.Add(testErrorButton);
 
@@ -627,7 +652,6 @@ public class ControlPanel : FlowLayoutPanel
 	Label label = new Label();
 	label.Text = name;
 	label.Size = labelSize;
-	label.Margin = controlPadding;
 	return label;
     }
 
@@ -636,9 +660,8 @@ public class ControlPanel : FlowLayoutPanel
 	RadioButton rb = new RadioButton();
 	rb.Name = "radio" + name;
 	rb.Size = radioSize;
-	rb.Text = "Use " + text + " as pivot variable";
+	rb.Text = text;
 	rb.CheckedChanged += new EventHandler(radio_click);
-	rb.Margin = controlPadding;
 	return rb;
     }
 
@@ -870,7 +893,7 @@ public class PmGraph : Form
 
     private Panel mainPanel;
     private ControlPanel controlPanel;
-    private Chart theChart;	// hold onto the current Chart object
+    private Chart currentChart;	// hold onto the current Chart object
     private Harness auto_oldcode;
     public Harness manual;
 
@@ -884,7 +907,7 @@ public class PmGraph : Form
     public PmGraph()
     {
 	Point originPoint = new Point(0, 0);
-	this.MinimumSize = new Size(800, 500);
+	this.MinimumSize = new Size(800, 600);
 	this.MaximumSize = new Size(
 		Screen.GetWorkingArea(originPoint).Width,
 		Screen.GetWorkingArea(originPoint).Height );
@@ -930,7 +953,7 @@ public class PmGraph : Form
     {
 	//MB.S("PmGraph.showFullChanged_action: details checkbox is " + (controlPanel.fullCheck.Checked ? "now" : "no longer") + " checked.");
 
-	auto_oldcode.setFull(controlPanel.fullCheck.Checked);
+//	auto_oldcode.setFull(controlPanel.fullCheck.Checked);
 	dropSelectionChanged(controlPanel.autoCheck);
     }
 
@@ -1374,14 +1397,14 @@ Console.WriteLine("updateChart called");
 		MB.S("auto_oldcoe is null!");
 		return;
 	    }
-	    theChart = auto_oldcode.getPreparedChart();
+	    currentChart = auto_oldcode.getPreparedChart();
 
-	    theChart.Width = getChartWidth();
-	    theChart.Height = getChartHeight();
+	    currentChart.Width = getChartWidth();
+	    currentChart.Height = getChartHeight();
 
-	    theChart.Location = new Point(
+	    currentChart.Location = new Point(
 		    controlPanel.Width + controlPanel.Margin.Left + 7, 0);
-	    mainPanel.Controls.Add(theChart);
+	    mainPanel.Controls.Add(currentChart);
 
 
 	    if (controlPanel.manualCheck.Enabled == false) {
@@ -1432,12 +1455,12 @@ Console.WriteLine("getResults called");
 	mainPanel.Width = this.Width; 
 	mainPanel.Height = this.Height;
 
-	if (mainPanel.Controls.Contains(theChart)) {
-	    theChart.Width = getChartWidth();
-	    theChart.Height = getChartHeight();
+	if (mainPanel.Controls.Contains(currentChart)) {
+	    currentChart.Width = getChartWidth();
+	    currentChart.Height = getChartHeight();
 
-	    theChart.Refresh();
-	} //conditional prevents updates during asyncronous loops <= ??
+	    currentChart.Refresh();
+	}
     }
 
     private int getChartWidth()
@@ -1448,28 +1471,25 @@ Console.WriteLine("getResults called");
 
     private int getChartHeight()
     {
-	return mainPanel.Height;
+	return mainPanel.Height - 20;
     }
 
     private bool detachChart()
     {
-	if (mainPanel.Controls.Contains(theChart)) {
-	    mainPanel.Controls.Remove(theChart);
-	    theChart = null;
-Console.WriteLine("detachChart() theChart removed");
+	if (mainPanel.Controls.Contains(currentChart)) {
+	    mainPanel.Controls.Remove(currentChart);
+	    currentChart = null;
 	    return true;
 	}
-Console.WriteLine("detachChart() theChart wasn't contained");
 	return false;
     }
 
     private void attachChart(Chart newchart)
     {
-	newchart.Location = new Point(controlPanel.Width + controlPanel.Margin.Left + 7, 0);
+	newchart.Location = new Point(
+		controlPanel.Width + controlPanel.Margin.Left + 7, 0);
 	mainPanel.Controls.Add(newchart);
-	theChart = newchart;
-
-Console.WriteLine("attachChart()");
+	currentChart = newchart;
     }
 
     public void exportCsv_click(object sender, EventArgs args)
@@ -1521,8 +1541,7 @@ Console.WriteLine("attachChart()");
     {
 	int trynum = 0;
 	string t = s;
-	while (true)
-	{
+	while (true) {
 	    try {
 		xmlFiles.Add(t, doc);
 		break;
@@ -1622,11 +1641,36 @@ Console.WriteLine("attachChart()");
 
 	registerXmlDocName(bench.averageRound.customName, bench.theDoc);
 
-	// below 'if' can go??
+	// XXX below 'if' can go??
 	if (manual.baseParams == null) manual.baseParams = bench.benchParams;
 
-	manual.addNewBenchround(bench.averageRound);
+	var brs = new List<BenchRound>();
+	brs.Add(bench.averageRound);
+	manual.addNewBenchrounds(brs);
     }
+
+    public void chartchange_click(object sender, EventArgs e)
+    {
+	RadioButton b = sender as RadioButton;
+
+	if (b == null) {
+	    MB.S("chartselect_click: sender is not radio button");
+	    return;
+	}
+	
+	if (!b.Checked) return; 
+
+	Chart chart;
+
+	detachChart();
+
+	chart = manual.switchToChart(b.Name);
+	chart.Width = getChartWidth();
+	chart.Height = getChartHeight();
+
+	attachChart(chart);
+    }
+
 
     public void deleteSelectedButton_click(object sender, EventArgs e)
     {

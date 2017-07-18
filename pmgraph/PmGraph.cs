@@ -934,7 +934,8 @@ public class PmGraph : Form
 	manual = new Harness(this);
 
 	// initialize pivotchart
-	Chart newchart = manual.getNewChart(getChartWidth(), getChartHeight());
+	Chart newchart = manual.rebuildAndGetNewChart(
+		getChartWidth(), getChartHeight());
 
 	if (newchart == null) MB.S("null chart returned");
 	attachChart(newchart);
@@ -1260,7 +1261,7 @@ public class PmGraph : Form
 					    {
 						if (!auto_oldcode.dumped && auto_oldcode.rounds.Count > 1)
 						{
-						    files += auto_oldcode.dumpPivotCsv(folderPath);
+						    files += auto_oldcode.exportCsv(folderPath);
 						    auto_oldcode.dumped = true;
 						}
 					    }
@@ -1496,7 +1497,7 @@ Console.WriteLine("getResults called");
     {
 	// checking getResults - auto_oldcode may be null.
 	if (getResults(false)) {
-	    auto_oldcode.dumpPivotCsv(null);
+	    auto_oldcode.exportCsv(null);
 	}
     }
 
@@ -1574,7 +1575,7 @@ Console.WriteLine("getResults called");
 
 	manual.destroyPivotChart();
 
-	Chart newchart = manual.getNewChart(
+	Chart newchart = manual.rebuildAndGetNewChart(
 		getChartWidth(),
 		getChartHeight());
 
@@ -1679,7 +1680,7 @@ Console.WriteLine("getResults called");
 
     public void exportCsvManual_click(object sender, EventArgs e)
     {
-	manual.dumpPivotCsv(null);
+	manual.exportCsv(null);
     }
 
     public void updateSelectionButtons(int i)

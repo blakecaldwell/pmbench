@@ -40,7 +40,7 @@ namespace PmGraphNS
 {
 
 public enum Access { uninitialized = -1, read = 0, write = 1 }
-public enum DetailLevel { uninitialized = -1, mini = 0, full = 1, currenttype = 2 }
+public enum DetailLevel { uninitialized = -1, mini = 0, full = 1 }
 
 public static class SafeXmlParse
 {
@@ -1125,7 +1125,7 @@ public class CsvWriter
      * the public entry point
      * returns 1 if everything is OK, 0 if any error
      */
-    public int writePivotCsvDump(string folder, Harness hn)
+    public int exportCsvToFile(string folder, Harness hn)
     {
 	string path = "";
 	bool good = true;
@@ -1322,7 +1322,7 @@ out_ret_0:
 	    }
 	case (7):   //Nice
 	    return "0"; // rounds[i].valueNice().ToString();
-	case (9): //stopgap -- current manual uses this
+	case (9): //stopgap -- current 'manual' uses this
 	    return hn.rounds[i].customName;
 	default:
 	    return "getPivotDumpHeader: (" + i + ") index " + hn.pivotIndex;
@@ -1462,13 +1462,10 @@ public class PlotPoints
     public Series getSeries(DetailLevel detail, Access type)
     {
 	switch (detail) {
-	case (DetailLevel.mini):
+	case DetailLevel.mini:
 	    return mini[type == Access.read ? 0: 1];
-	case (DetailLevel.full):
+	case DetailLevel.full:
 	    return full[type == Access.read ? 0: 1];
-	case (DetailLevel.currenttype):
-	    MB.S("MDC::getChart : unsupported detail level");
-	    return null;
 	default:
 	    return null;
 	}
@@ -1791,20 +1788,18 @@ public class PivotChart
 	    chart.Text = "histogram";
 
 //	    chart.MouseWheel += chartZoom;
-	    chart.MouseEnter += chartMouseEnter;
-	    chart.MouseLeave += chartMouseLeave;
 	    chart.MouseMove += chartMouseHover;
 	    chart.MouseClick += chartMouseClick;
 	    chart.Width = width;
 	    chart.Height = height;
 	    switch (i) {
-	    case (0):
+	    case 0:
 		miniChart = chart;
 		break;
-	    case (1):
+	    case 1:
 		fullChart = chart;
 		break;
-	    case (2):
+	    case 2:
 		logChart = chart;
 		histogram.AxisY.IsLogarithmic = true;
 		break;
@@ -1846,22 +1841,6 @@ Console.WriteLine("createHoverSeries(): already exists");
 	return c.HitTest(c.PointToClient(point).X, c.PointToClient(point).Y);
     }
 
-    private void chartMouseEnter(object sender, EventArgs e)
-    {
-	Chart chart = sender as Chart;
-	if (!chart.Focused) chart.Focus();
-
-	hover.setSeriesEnabled(true);
-    }
-
-    private void chartMouseLeave(object sender, EventArgs e)
-    {
-	Chart chart = sender as Chart;
-	if (chart.Focused) chart.Parent.Focus();
-
-	hover.setSeriesEnabled(false);
-    }
-
     public void chartMouseHover(object sender, EventArgs args)
     {
 	HitTestResult htr = getHitTestResult(currentChart, 
@@ -1871,13 +1850,6 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    if (htr.Object == null) return; //error?
 
 	    Series s = currentChart.Series[(htr.Object as LegendItem).SeriesName];
-	    // bring the series to the front to highlight
-	    //if (s != null) {
-	//	currentChart.Series.Remove(s);
-	//	currentChart.Series.Add(s);
-	 //   }
-
-	    //s.BorderWidth = 4;
 	    hover.updateHoverSeries(s, currentChart);
 	    hover.setSeriesEnabled(true);
 	} else {
@@ -1991,20 +1963,6 @@ Console.WriteLine("createHoverSeries(): already exists");
 	}
 	x.ScaleView.Zoom(x1, x2);
 	y.ScaleView.Zoom(y1, y2);
-    }
-
-    public Chart getChart(DetailLevel detail)
-    {
-	switch (detail) {
-	case (DetailLevel.mini):
-	    return miniChart;
-	case (DetailLevel.full):
-	    return fullChart;
-	case (DetailLevel.currenttype):
-	    return currentChart;
-	default:
-	    return null;
-	}
     }
 
     public static Color[] readColors = { 
@@ -2151,7 +2109,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    if (br.ratio() <= 0) {
 		; // don't have partner series..
 	    } else {
-		// below hack relies on how we name series..
+		// XXX below hack relies on how we name series..
 		string pname = br.customName + " (read)";
 		partnerSeries.Add(pname, bs);
 	    }
@@ -2162,7 +2120,7 @@ Console.WriteLine("createHoverSeries(): already exists");
      */
     public void bumpHoverSeries()
     {
-	// bring the series to the front to highlight
+	// bring the series to the front to better highlight
 	Series s; 
 	s = hover.miniSeries;
 	miniChart.Series.Remove(s);
@@ -2192,18 +2150,34 @@ public class Harness
     public PmGraph pmgraph;
     public bool dumped = false;
 
-    public void selectAll()
+    // this constructor is for embedded 'manual'
+    public Harness(PmGraph pmg)
     {
-	thePivotChart.selectAll();
+	thePivotChart = null;
+	baseParams = null;
+	pivotIndex = 9;
+	rounds = new List<BenchRound>(); // empty initially.
+	pmgraph = pmg;
     }
 
-    private static string TextDialog(string prompt, string value)
+    // this constructor is for old messy code
+    public Harness(
+	    ParamSet ps, int pivotindex, List<BenchRound> br, PmGraph pmg)
+    {
+	thePivotChart = null;
+	baseParams = ps;
+	pivotIndex = pivotindex;
+	rounds = br;
+	pmgraph = pmg;
+    }
+
+    private static string TextDialog(string prompt, string text)
     {
 	Form dialog = new Form();
 	dialog.Text = prompt;
 	dialog.Height = 128;
 	TextBox textbox = new TextBox();
-	textbox.Text = value;
+	textbox.Text = text;
 	textbox.Width = 256;
 	textbox.Location = new Point (16, 16);
 	Button ok = new Button(), cancel = new Button();
@@ -2216,7 +2190,7 @@ public class Harness
 	dialog.CancelButton = cancel;
 	dialog.Controls.AddRange(new Control[] { textbox, ok, cancel });
 	DialogResult ret = dialog.ShowDialog();
-	if (ret == DialogResult.OK) return value;
+	if (ret == DialogResult.OK) return text;
 	return null;
     }
 
@@ -2301,46 +2275,9 @@ out_here:
 	return deleted;
     }
 
-    // this constructor is for embedded 'manual'
-    public Harness(PmGraph pmg)
+    public void selectAll()
     {
-	thePivotChart = null;
-	baseParams = null;
-	pivotIndex = 9;
-	rounds = new List<BenchRound>(); // empty initially.
-	pmgraph = pmg;
-    }
-
-    // this constructor is for old mess
-    public Harness(
-	    ParamSet ps,
-	    int pivotindex,
-	    List<BenchRound> br,
-	    PmGraph pmg)
-    {
-	thePivotChart = null;
-	baseParams = ps;
-	pivotIndex = pivotindex;
-	rounds = br;
-	pmgraph = pmg;
-    }
-
-    public void addNewBenchrounds(List<BenchRound> brs)
-    {
-	foreach(var br in brs) {
-	    rounds.Add(br);
-
-	    br.populatePlotPoints();
-	    if (br.wasDeletedDontBother) {
-Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
-		continue;
-	    }
-	    thePivotChart.addSeries(br);
-	}
-
-	thePivotChart.bumpHoverSeries();
-	thePivotChart.resetAllSelection();
-	thePivotChart.refreshSelectionColors();
+	thePivotChart.selectAll();
     }
 
     public Chart switchToChart(string name)
@@ -2362,10 +2299,32 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
 	}
 
 	return thePivotChart.currentChart;
-
     }
 
-    private Chart initializePivotChart(int width, int height) 
+    public void addNewBenchrounds(List<BenchRound> brs)
+    {
+	foreach(var br in brs) {
+	    rounds.Add(br);
+
+	    br.populatePlotPoints();
+	    if (br.wasDeletedDontBother) {
+Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
+		continue;
+	    }
+	    thePivotChart.addSeries(br);
+	}
+
+	thePivotChart.bumpHoverSeries();
+	thePivotChart.resetAllSelection();
+	thePivotChart.refreshSelectionColors();
+    }
+
+
+    /*
+     * newly populate charts and initialize.
+     * rounds can have data, and chart will be rebuilt from it.
+     */
+    public Chart rebuildAndGetNewChart(int width, int height) 
     {
 	// this PivotChart is for display
 	thePivotChart = new PivotChart(this, width, height);
@@ -2386,19 +2345,11 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
     }
 
     /*
-     * called by PmGraph.redrawManual()
-     */
-    public Chart getNewChart(int w, int h)
-    {
-	return initializePivotChart(w, h);
-    }
-
-    /*
      * called by PmGraph.updateChart() <- not being used actively..
      */
     public Chart getPreparedChart()
     {
-	return thePivotChart.getChart(DetailLevel.currenttype);
+	return thePivotChart.currentChart;
     }
 
     /*
@@ -2406,9 +2357,7 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
      */
     public void destroyPivotChart()
     {
-	if (thePivotChart == null) {
-	    return;
-	}
+	if (thePivotChart == null) return;
 
 	if (thePivotChart.currentChart == null) {
 	    MB.S("destroyPivotChart: Chart already destroyed");
@@ -2421,10 +2370,10 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
     /*
      * called when export CSV button clicked and other automated paths
      */
-    public int dumpPivotCsv(string folder)
+    public int exportCsv(string folder)
     {
 	var foo = new CsvWriter();
-	return foo.writePivotCsvDump(folder, this);
+	return foo.exportCsvToFile(folder, this);
     }
 
     public int getChartSelectionCount()

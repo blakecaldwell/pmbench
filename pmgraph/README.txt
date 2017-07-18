@@ -15,7 +15,7 @@ Execute the following command in the source directory using developer command pr
 - Linux host build instruction
 Prerequisite: Monodevelop package (mono-devel).
 
-$ mcs -reference:System.Drawing.dll,System.Windows.Forms.dll,System.Windows.Forms.DataVisualization.dll PmGraph.cs Program.cs -out:pmgraph.exe
+$ mcs -reference:System.Drawing.dll,System.Windows.Forms.dll,System.Windows.Forms.DataVisualization.dll PmGraph.cs PmXml.cs Program.cs -out:pmgraph.exe
 
 Copy pmgraph.exe to windows and execute there.
 

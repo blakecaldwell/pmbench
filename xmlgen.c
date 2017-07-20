@@ -22,7 +22,7 @@ static xmlChar tempbuf[57];
 
 /* catch libxml header change */
 #if LIBXML_VERSION < 20904 
-  #define XFMT_TYPE (BAD_CAST)
+  #define XFMT_TYPE  BAD_CAST
 #else
   #define XFMT_TYPE 
 #endif

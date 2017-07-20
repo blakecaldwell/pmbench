@@ -55,7 +55,12 @@ public static class SafeXmlParse
 	    return null;
 	}
 	catch (NullReferenceException x) {
-	    MB.S("node selection null reference exception:\n" + x.ToString());
+	    if (where == null) {
+		MB.S("selNode() exception: 'where' is null\n"+
+		    "\nxpath: " + xpath);
+	    }
+	    MB.S("selNode() null reference exception:\n" + x.ToString() +
+		    "\nxpath: " + xpath);
 	    return null;
 	}
     }
@@ -383,6 +388,7 @@ public class BenchSiblings
 	readSpikeHexVal = 0;
 	writeSpikeHexVal = 0;
 
+	// split read/write cases as we can have read-only or write-only runs
 	for (int i = 0; i < readbuckets.Count; i++) {
 	    double tempSpike = SafeXmlParse.toDouble(readbuckets[i], "sum_count");
 	    if (tempSpike > readSpike) {
@@ -390,7 +396,7 @@ public class BenchSiblings
 		readSpikeIntervalHi = SafeXmlParse.toInt(readbuckets[i], "bucket_interval/interval_hi");
 	    }
 
-	    if ( readbuckets[i].Attributes.Item(0).Name.Equals("index") 
+	    if (readbuckets[i].Attributes.Item(0).Name.Equals("index") 
 		 && !readbuckets[i].Attributes.Item(0).Value.Equals("0")) {
 		for (int j = 0; j < 16; j++) {
 		    double hexbin = SafeXmlParse.toDouble(readbuckets[i], "bucket_hexes/hex[@index='" + j + "']");
@@ -400,8 +406,10 @@ public class BenchSiblings
 		    }
 		}
 	    }
+	}
 
-	    tempSpike = SafeXmlParse.toDouble(writebuckets[i], "sum_count");
+	for (int i = 0; i < writebuckets.Count; i++) {
+	    double tempSpike = SafeXmlParse.toDouble(writebuckets[i], "sum_count");
 	    if (tempSpike > writeSpike) {
 		writeSpike = tempSpike;
 		writeSpikeIntervalHi = SafeXmlParse.toInt(writebuckets[i], "bucket_interval/interval_hi");
@@ -1337,6 +1345,11 @@ out_ret_0:
 // 
 public static class XmlToSeries
 {
+    private static double xvalToSec(double xval)
+    {
+	return Math.Pow(2, xval - 30);
+    }
+
     private static void writeHexBinsToSeries(
 	    XmlNode bucket,
 	    double interval_lo, 
@@ -1351,22 +1364,23 @@ public static class XmlToSeries
 		    "bucket_hexes/hex[@index='" + j + "']");
 	    //if (hex == 0) { continue; }
 	    double xval = interval_lo + (0.5 + j) * interval_;
-	    series.Points.AddXY(xval, hex);
+	    series.Points.AddXY(xvalToSec(xval), hex);
 	}
     }
 
     private static void writeSumCountOnlyToChart(XmlNode bucket, Series series)
     {
 	double sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
-	//if (sum_count == 0) { return; }
+
+	if (sum_count == 0) return;
+
 	double interval_lo = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_lo");
 	double interval_hi = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_hi");
 	double interval_ = (interval_hi - interval_lo);
 	double xval = interval_lo + (interval_ / 2);
-	series.Points.AddXY(xval, sum_count);
+	series.Points.AddXY(xvalToSec(xval), sum_count);
     }
     
-    // get the chart ready. Important for the Series that is produced.
     private static void getHisto_body(
 	    Series series, 
 	    XmlNode stats, 
@@ -1391,8 +1405,8 @@ public static class XmlToSeries
 	bucket = bucket0.Item(0);
 	sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
 
-	series.Points.AddXY(8, sum_count);
-	series.Points.AddXY(8, sum_count);
+	series.Points.AddXY(xvalToSec(8), sum_count);
+	series.Points.AddXY(xvalToSec(8), sum_count);
 
 	//intentionally miscalculates x coordinate because 
 	//(2^lo+(j+0.5)*((2^hi-2^lo)/16)) stretches the x axis
@@ -1412,8 +1426,8 @@ public static class XmlToSeries
 	}
 	
 	//deal with the rest of the index 0 histo buckets
-	for (int j = 1; j < bucket0.Count; j++) {
-	    bucket = bucket0.Item(j);
+	for (int i = 1; i < bucket0.Count; i++) {
+	    bucket = bucket0.Item(i);
 	    writeSumCountOnlyToChart(bucket, series);
 	}
 	bucket = null;
@@ -1497,6 +1511,14 @@ public class PivotChart
 
 	public BenchRound theBenchRound;
 
+	public Binder()
+	{
+	    myAccessType = Access.uninitialized;
+	    selected = false;
+	    grayed = false;
+	    activeColor = unselectedColor;
+	}
+
 	public void updateSelectionColor(int sel)
 	{
 	    if (!selected && sel > 0) {
@@ -1577,14 +1599,6 @@ public class PivotChart
 	    logSeries.Color = c;
 	    return c;
 	}
-
-	public Binder()
-	{
-	    myAccessType = Access.uninitialized;
-	    selected = false;
-	    grayed = false;
-	    activeColor = unselectedColor;
-	}
     }
 
     private class Hover : Binder
@@ -1596,6 +1610,15 @@ public class PivotChart
 	    s.ChartType = SeriesChartType.SplineArea;
 	    s.Enabled = false;
 	    s.IsVisibleInLegend = false;
+	    
+	    // add dummy entry to prevent 'can't draw Log scale'
+	    // exception for empty series. This gets overriden
+	    // whenever hover event updates the series.
+	    s.Points.Clear();
+	    s.Points.AddXY(0.1, 100); 
+	    s.Points.AddXY(0.01, 10); 
+	    s.Points.AddXY(0.001, 100); 
+	    s.Points.AddXY(0.00001, 10); 
 	    return s;
 	}
 
@@ -1605,13 +1628,13 @@ public class PivotChart
 	    lastDrawn = null;
 
 	    pivotchart.miniChart.Series.Add(name);
-	    miniSeries = initializeHoverSeries(pivotchart.miniChart.Series.FindByName(name));
+	    miniSeries = initializeHoverSeries(pivotchart.miniChart.Series[name]);
 
 	    pivotchart.fullChart.Series.Add(name);
-	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series.FindByName(name));
+	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series[name]);
 
 	    pivotchart.logChart.Series.Add(name);
-	    logSeries = initializeHoverSeries(pivotchart.logChart.Series.FindByName(name));
+	    logSeries = initializeHoverSeries(pivotchart.logChart.Series[name]);
 	    seriesName = name;
 	}
 
@@ -1745,7 +1768,7 @@ public class PivotChart
 	foreach (var name in deletionList) {
 	    Binder bs = allSeries[name];
 	    allSeries.Remove(name);
-	    partnerSeries.Remove(name);	// no exception even if not found
+	    partnerSeries.Remove(name);	// no exception thrown even if not found
 	    bs.finalizeDeletion(miniChart, fullChart, logChart);
 	}
 
@@ -1765,27 +1788,38 @@ public class PivotChart
 	harness = hn;
 
 	for (int i = 0; i < 3; i++) {
-	    string s = null;
 	    Chart chart = new Chart();
-	    ChartArea histogram = new ChartArea();
-	    histogram.Name = "histogram";
-	    histogram.AxisX.Title = "Latency interval (2^x ns)" + s;
-	    histogram.AxisX.ScaleView.Zoomable = true;
+	    ChartArea chartarea = new ChartArea();
+	    chartarea.Name = "histogram";
+	    chartarea.AxisX.Title = "Latency in second (log)";
+	    chartarea.AxisX.ScaleView.Zoomable = true;
+	    chartarea.AxisX.MajorTickMark.Enabled = true;
+	    chartarea.AxisX.MinorTickMark.Enabled = true;
+	    chartarea.AxisX.MinorTickMark.Interval = 1;
+	    chartarea.AxisX.MajorGrid.Enabled = true;
+//	    chartarea.AxisX.LabelStyle.Format = "##.#";
+	    chartarea.AxisX.IsLogarithmic = false;
 
-	    histogram.AxisY.Title = "Sample count";
-	    histogram.AxisY.ScaleView.Zoomable = true;
-	    //histogram.AxisY.IsLogarithmic = true;
+	    // mono has problem with calling CustomLabels methods..
+	    //chartarea.AxisX2.Interval = 1;
+	    //chartarea.AxisX2.Maximum = 32;
+	    //chartarea.AxisX2.CustomLabels.Add(9.5,10.5,"1us");
+	    //chartarea.AxisX2.CustomLabels.Add(19.5,20.5,"1ms");
 
-	    Legend legend1 = new Legend();
-	    legend1.Name = "Legend";
-	    legend1.DockedToChartArea = "histogram";
-	    legend1.IsDockedInsideChartArea = true;
+	    chartarea.AxisY.Title = "Sample count";
+	    chartarea.AxisY.ScaleView.Zoomable = true;
+	    //chartarea.AxisY.IsLogarithmic = true;
 
-	    chart.ChartAreas.Add(histogram);
+
+	    Legend legend = new Legend();
+	    legend.Name = "Legend";
+	    legend.DockedToChartArea = "histogram";
+
+	    chart.ChartAreas.Add(chartarea);
 	    chart.Name = "Latency histogram (" + (i == 0 ? "mini)" : "full)");
-	    chart.Legends.Add(legend1);
+	    chart.Legends.Add(legend);
 	    chart.TabIndex = 1;
-	    chart.Text = "histogram";
+	    chart.Text = "Latency histogram";
 
 //	    chart.MouseWheel += chartZoom;
 	    chart.MouseMove += chartMouseHover;
@@ -1801,7 +1835,7 @@ public class PivotChart
 		break;
 	    case 2:
 		logChart = chart;
-		histogram.AxisY.IsLogarithmic = true;
+		chartarea.AxisY.IsLogarithmic = true;
 		break;
 	    }
 	}
@@ -1820,6 +1854,23 @@ public class PivotChart
 	currentChart = logChart;
     }
 
+    // MSChart can't draw empty series with Log x scale, ugh.
+    // solution here is to temporaily switch to Linear X scale
+    // when we have nothing to draw. set it back to Log when
+    // more series are added. Also, set it Linear when empty.
+    public void setAllLogX()
+    {
+	miniChart.ChartAreas[0].AxisX.IsLogarithmic = true;
+	fullChart.ChartAreas[0].AxisX.IsLogarithmic = true;
+	logChart.ChartAreas[0].AxisX.IsLogarithmic = true;
+    }
+    public void setAllLinearX()
+    {
+	miniChart.ChartAreas[0].AxisX.IsLogarithmic = false;
+	fullChart.ChartAreas[0].AxisX.IsLogarithmic = false;
+	logChart.ChartAreas[0].AxisX.IsLogarithmic = false;
+    }
+
     public void createHoverSeries()
     {
 	if (hover != null) {
@@ -1828,10 +1879,10 @@ Console.WriteLine("createHoverSeries(): already exists");
 	}
 	hover = new Hover(this);
 
-	hover.setSeriesEnabled(true);
+	hover.setSeriesEnabled(false);
     }
 
-    private static HitTestResult getHitTestResult( Chart c, Point mousepos)
+    private static HitTestResult getHitTestResult(Chart c, Point mousepos)
     {
 	Point point = new Point();
 	
@@ -1938,8 +1989,8 @@ Console.WriteLine("createHoverSeries(): already exists");
     {
 	Chart chart = sender as Chart;
 
-	Axis x = chart.ChartAreas.FindByName("histogram").AxisX;
-	Axis y = chart.ChartAreas.FindByName("histogram").AxisY;
+	Axis x = chart.ChartAreas[0].AxisX;
+	Axis y = chart.ChartAreas[0].AxisY;
 
 	double xMin = x.ScaleView.ViewMinimum;
 	double xMax = x.ScaleView.ViewMaximum;
@@ -1993,7 +2044,7 @@ Console.WriteLine("createHoverSeries(): already exists");
     /*
      * Log chart doesn't allow zero.
      * so we change 0 to 1 for log display.
-     * This is for disply only, and we use real data for csv output
+     * This is for disply only, and we retain/use real data for csv output
      */
     private static void massageDataPoints(Series series)
     {
@@ -2270,6 +2321,10 @@ public class Harness
 	    }
 	}
 
+	if (rounds.Count == 0) {
+	    thePivotChart.setAllLinearX();
+	}
+
 out_here:
 	thePivotChart.refreshSelectionColors();
 	return deleted;
@@ -2313,7 +2368,7 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
 	    }
 	    thePivotChart.addSeries(br);
 	}
-
+	thePivotChart.setAllLogX();
 	thePivotChart.bumpHoverSeries();
 	thePivotChart.resetAllSelection();
 	thePivotChart.refreshSelectionColors();
@@ -2326,7 +2381,6 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
      */
     public Chart rebuildAndGetNewChart(int width, int height) 
     {
-	// this PivotChart is for display
 	thePivotChart = new PivotChart(this, width, height);
 
 	foreach (var br in rounds) {
@@ -2335,6 +2389,10 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
 	    if (br.wasDeletedDontBother) continue;
 
 	    thePivotChart.addSeries(br);
+	}
+
+	if (rounds.Count == 0) {
+	    thePivotChart.setAllLinearX();
 	}
 
 	thePivotChart.createHoverSeries();

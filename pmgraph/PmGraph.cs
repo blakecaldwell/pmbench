@@ -57,6 +57,8 @@ public class ControlPanel : FlowLayoutPanel
 
     // below for testing error check code
     private Button testErrorButton;
+    private Button screenshotButton;
+    private Button aboutButton;
 
     public int currentKernelIndex, currentDeviceIndex, currentMemoryIndex, currentMapsizeIndex, currentJobsIndex, currentDelayIndex, currentRatioIndex;
     private int tempKernelIndex, tempDeviceIndex, tempMemoryIndex, tempMapsizeIndex, tempJobsIndex, tempDelayIndex, tempRatioIndex, tempRadioIndex;
@@ -83,6 +85,32 @@ public class ControlPanel : FlowLayoutPanel
     private Label manualLabel;
     //public TextBox nameAveragesField;
 
+    private static int debugenable_state = 0;
+    private void easteregg(int id)
+    {
+	if (debugenable_state == 2)  {
+	    this.Controls.Add(testErrorButton);
+	    return;
+	}
+	if (id == 1 && debugenable_state == 0) {
+	    debugenable_state = 1;
+	    return;
+	} 
+	if (id == 2 && debugenable_state == 1) {
+	    debugenable_state = 2;
+	    return;
+	}
+
+	debugenable_state = 0;
+    }
+    
+    private void about_click(object sender, EventArgs e)
+    {
+	easteregg(2);
+	MessageBox.Show("pmgraph v0.8\n\n" +
+		"Copyright (c) 2017 - All rights reserved\n" +
+		"Pmbench project - http://bitbucket.org/jisooy/pmbench");
+    }
     /*
      * fill out the function below to trigger error condtion in 
      * internal function
@@ -103,6 +131,7 @@ public class ControlPanel : FlowLayoutPanel
 
     private void helpButton_click(object sender, EventArgs e)
     {
+	easteregg(1);
 	MessageBox.Show(
 	"Buttons:\n"  +
 	"\tImport opens XML files produced by pmbench with the -f parameter;\n" +
@@ -221,7 +250,7 @@ public class ControlPanel : FlowLayoutPanel
 	// place all selection controls to select Panel
 	selectPanel = new Panel();
 	selectPanel.BorderStyle = BorderStyle.Fixed3D;
-	selectPanel.Size = new Size(95, 180);
+	selectPanel.Size = new Size(78, 180);
 
 	String[] knobStrs = {
 	    "Kernel", "Device", "Memory", "Mapsize", 
@@ -254,7 +283,7 @@ public class ControlPanel : FlowLayoutPanel
     {
 	pmgraph = p;
 
-	this.Width = 95;
+	this.Width = 78;
 	this.Height = pmgraph.Height;
 
 	Padding checkPadding = new Padding(6, 8, 0, 0);
@@ -300,9 +329,9 @@ public class ControlPanel : FlowLayoutPanel
 	manualLabel.Width = 110;
 
 
-	importManualSingleButton = initButton("Import", 
+	importManualSingleButton = initButton("Import XML", 
 		importSingleBenches_click, true);
-	exportManualButton = initButton("Export", 
+	exportManualButton = initButton("Export CSV", 
 		pmgraph.exportCsvManual_click, false);
 	averageSelectedButton = initButton("Average selected",
 		pmgraph.averageSelectedButton_click, false);
@@ -326,7 +355,7 @@ public class ControlPanel : FlowLayoutPanel
 	// chart selection radio button 
 	chartSelectPanel = new Panel();
 	chartSelectPanel.BorderStyle = BorderStyle.Fixed3D;
-	chartSelectPanel.Size = new Size(95, 80);
+	chartSelectPanel.Size = new Size(78, 80);
 
 	String[] chtnames = { "mini", "full", "log" };
 	String[] chttexts = { "Mini (linear)", "Full (linear)", "Full (Log)" };
@@ -339,26 +368,39 @@ public class ControlPanel : FlowLayoutPanel
 	    rb.Checked = chtchecked[i];
 	    rb.Size = radioSize;
 	    rb.CheckedChanged += new EventHandler(pmgraph.chartchange_click);
-	    rb.Location = new Point(2, i * 25 + 3);
+	    rb.Location = new Point(0, i * 25 + 3);
 	    selectChart[i] = rb;
 	}
 	chartSelectPanel.Controls.AddRange(selectChart);
 	this.Controls.Add(chartSelectPanel);
 
 
+	// these need to go
 	// old exportButton recovered code
 	exportButtonOld = initButton("Expt old", 
 		pmgraph.exportCsv_click, false);
 	autoExportButton = initButton("Auto export",
 		pmgraph.autoCsvDump_click, false);
 
+	/*
 	this.Controls.Add(exportButtonOld);
 	this.Controls.Add(autoExportButton);
+*/
+	// 
+	screenshotButton = initButton("Screenshot", 
+		pmgraph.screenshot_click, true);
+	this.Controls.Add(screenshotButton);
+
+	aboutButton = initButton("About", 
+		about_click, true);
+	this.Controls.Add(aboutButton);
 
 	// debug dump button 
 	testErrorButton = initButton("debug dump", 
 		testError_click, true);
 	this.Controls.Add(testErrorButton);
+	this.Controls.Remove(testErrorButton);
+
 
 // JY below left for future reference
 //	    this.Controls.AddRange(new Control[]
@@ -883,9 +925,9 @@ public class ControlPanel : FlowLayoutPanel
 	deleteSelectedButton.Enabled = (t1 && i > 0);
 	averageSelectedButton.Enabled = (t1 && i > 2);
     }
-}
+}   // ControlPanel
 
-public class PmGraph : Form
+public class PmGraph : System.Windows.Forms.Form
 {
     private Dictionary<string, XmlDocument> xmlFiles;
     private Dictionary<string, BenchSiblings> allBenchSiblings;
@@ -901,22 +943,23 @@ public class PmGraph : Form
     private string[] deviceFilenameStrings = { "chatham", "NANDSSD", "RAMDISK" };
     private int[] physMemValues = { 256, 512, 1024, 2048, 4096, 8192, 16384 };
     private int totalValidated = 0, failedValidation = 0;
-//        private string replaceDir;
-
 
     public PmGraph()
     {
+	this.SuspendLayout();
+
+	this.Text = "Pmgraph - Pmbench XML result reader";
 	Point originPoint = new Point(0, 0);
-	this.MinimumSize = new Size(800, 600);
+	this.MinimumSize = new Size(500, 400);
 	this.MaximumSize = new Size(
 		Screen.GetWorkingArea(originPoint).Width,
 		Screen.GetWorkingArea(originPoint).Height );
-	this.Resize += new EventHandler(resize_event);
+	this.Size = new Size(780, 580);
 
 	mainPanel = new Panel();
 	mainPanel.Location = new Point(0, 0);
 	mainPanel.Width = this.Width;
-	mainPanel.Height = this.Height;
+	mainPanel.Height = this.Height - SystemInformation.CaptionHeight;
 
 	controlPanel = new ControlPanel(this);
 
@@ -927,6 +970,7 @@ public class PmGraph : Form
 	
 	this.Controls.Add(mainPanel);
 
+
 	xmlFiles = new Dictionary<string, XmlDocument>();
 	allBenchSiblings = new Dictionary<string, BenchSiblings>();
 	allHarnesses = new Dictionary<string, Harness>();
@@ -935,14 +979,17 @@ public class PmGraph : Form
 
 	// initialize pivotchart
 	Chart newchart = manual.rebuildAndGetNewChart(
-		getChartWidth(), getChartHeight());
+		calculateChartWidth(), calculateChartHeight());
 
-	if (newchart == null) MB.S("null chart returned");
+	if (newchart == null) MB.S("PmGraph: null chart returned");
 	attachChart(newchart);
 	
 	// what are these?
 	auto_oldcode = manual;
 	controlPanel.setControlsEnabled_dummy();
+
+	this.Resize += new EventHandler(resize_event);
+	this.ResumeLayout();
     }
 
     public void dropSelectionChanged_action(object o, EventArgs args)
@@ -1085,7 +1132,8 @@ public class PmGraph : Form
 		    }
 		    catch (ArgumentException x) {
 	// Jisoo: uncommented the followin two lines
-			MB.S("Exception adding key " + i + "_" + j + "_" + k + " to dictionary:\n" + x.ToString());
+			MB.S("Exception adding key " + i + "_" + j + 
+				"_" + k + " to dictionary:\n" + x.ToString());
 			return added;
 		    }
 		}
@@ -1400,11 +1448,13 @@ Console.WriteLine("updateChart called");
 	    }
 	    currentChart = auto_oldcode.getPreparedChart();
 
-	    currentChart.Width = getChartWidth();
-	    currentChart.Height = getChartHeight();
+	    currentChart.Width = calculateChartWidth();
+	    currentChart.Height = calculateChartHeight();
 
 	    currentChart.Location = new Point(
-		    controlPanel.Width + controlPanel.Margin.Left + 7, 0);
+		    controlPanel.Width +
+		    controlPanel.Margin.Left +
+		    controlPanel.Margin.Right, 0);
 	    mainPanel.Controls.Add(currentChart);
 
 
@@ -1454,41 +1504,45 @@ Console.WriteLine("getResults called");
     private void resize_event(object sender, EventArgs args)
     {
 	mainPanel.Width = this.Width; 
-	mainPanel.Height = this.Height;
+	mainPanel.Height = this.Height - SystemInformation.CaptionHeight;
 
 	if (mainPanel.Controls.Contains(currentChart)) {
-	    currentChart.Width = getChartWidth();
-	    currentChart.Height = getChartHeight();
+	    currentChart.Width = calculateChartWidth();
+	    currentChart.Height = calculateChartHeight();
 
-	    currentChart.Refresh();
+	    // don't need to call Refresh()
+	    //currentChart.Refresh();
 	}
     }
 
-    private int getChartWidth()
+    private int calculateChartWidth()
     {
-	return mainPanel.Width - controlPanel.Width 
-		- controlPanel.Margin.Left - 17;
+	return mainPanel.Width 
+		- controlPanel.Width 
+		- controlPanel.Margin.Left 
+		- controlPanel.Margin.Right;
     }
 
-    private int getChartHeight()
+    private int calculateChartHeight()
     {
-	return mainPanel.Height - 20;
+	return mainPanel.Height;
     }
 
-    private bool detachChart()
+    private void detachChart()
     {
 	if (mainPanel.Controls.Contains(currentChart)) {
 	    mainPanel.Controls.Remove(currentChart);
 	    currentChart = null;
-	    return true;
 	}
-	return false;
     }
 
     private void attachChart(Chart newchart)
     {
 	newchart.Location = new Point(
-		controlPanel.Width + controlPanel.Margin.Left + 7, 0);
+		controlPanel.Width 
+		+ controlPanel.Margin.Left 
+		+ controlPanel.Margin.Right
+		, 0);
 	mainPanel.Controls.Add(newchart);
 	currentChart = newchart;
     }
@@ -1576,8 +1630,8 @@ Console.WriteLine("getResults called");
 	manual.destroyPivotChart();
 
 	Chart newchart = manual.rebuildAndGetNewChart(
-		getChartWidth(),
-		getChartHeight());
+		calculateChartWidth(),
+		calculateChartHeight());
 
 	if (newchart == null) MB.S("redrawManual: null chart returned");
 
@@ -1666,8 +1720,8 @@ Console.WriteLine("getResults called");
 	detachChart();
 
 	chart = manual.switchToChart(b.Name);
-	chart.Width = getChartWidth();
-	chart.Height = getChartHeight();
+	chart.Width = calculateChartWidth();
+	chart.Height = calculateChartHeight();
 
 	attachChart(chart);
     }
@@ -1702,7 +1756,17 @@ Console.WriteLine("getResults called");
 
 	manual.selectAll();
     }
-}
+
+    public void screenshot_click(object sender, EventArgs e)
+    {
+	using (MemoryStream ms = new MemoryStream()) {
+	    currentChart.SaveImage(ms, ChartImageFormat.Bmp);
+	    Clipboard.SetImage(new Bitmap(ms));
+	}
+	MessageBox.Show("Chart image saved to Clipboard");
+    }
+
+}   //PmGraph
 
 
 } // namespace PmGraphSpace

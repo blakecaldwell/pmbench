@@ -147,12 +147,49 @@ uint32_t measure_write(uint32_t *ptr)
     return sw_get_nsec(&sw);
 }
 
+/*
+ * this performs write after explicit read
+ */
+static
+_code 
+uint32_t measure_write_after_read(uint32_t *ptr)
+{
+    register uint32_t val = 0;
+    struct stopwatch sw;
+    sw_reset(&sw, get_tsops());
+    sw_start(&sw);
+    // asm following implements: *ptr = (*ptr);
+    asm volatile (
+	 "movl (%1), %0\n\t"
+	 "movl %0, (%1)\n\t"
+	  : "=r"(val), "=r"(ptr)
+	  : "1"(ptr)
+	  : "memory"
+	  );
+
+    sw_stop(&sw);
+
+    return sw_get_nsec(&sw);
+}
+
 _code 
 uint32_t access_histogram(uint32_t *ptr, int is_write)
 {
     uint32_t latency;
 
-    latency = is_write ? measure_write(ptr) : measure_read(ptr);
+    switch (is_write) {
+    case 0:
+	latency = measure_read(ptr);
+	break;
+    case 1:
+	latency = measure_write(ptr);
+	break;
+    case 2:
+	latency = measure_write_after_read(ptr);
+	break;
+    default:
+	latency = measure_read(ptr);
+    }
     return latency;
 }
 

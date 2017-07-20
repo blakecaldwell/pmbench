@@ -84,6 +84,7 @@ static struct argp_option options[] = {
     { "offset", 'o', "OFFSET", 0, "Specify static page access offset (default random)" },
     { "initialize", 'i', 0, OPTION_ARG_OPTIONAL, "Initialize memory map with garbage data" },
     { "threshold", 'h', "THRESHOLD", 0, "Set the threshold time to trigger the ftrace log" },
+    { "wrneedsrd", 'z', 0, OPTION_ARG_OPTIONAL, "Write is preceeded by read on the same memory" },
 #ifdef PMB_XML
     { "file", 'f', "FILE", 0, "Filename for XML output" },
 #endif
@@ -120,6 +121,7 @@ void set_default_params(parameters* p)
     p->jobs = 1;
     p->init_garbage = 0;
     p->threshold = 0;
+    p->write_needs_read = 0;
 #ifdef XALLOC
     p->xalloc_mib = 0;
     p->xalloc_path = "/dev/ram0";
@@ -155,6 +157,7 @@ void print_params(const parameters* p)
     printf("  offset       = "); if (p->offset < 0) printf("random\n"); else printf("%d\n", p->offset);
     printf("  ratio        = %d%%\n", p->ratio);
     printf("  threshold    = %d\n", p->threshold);
+    printf("  wrneedsrd	   = %d\n", p->write_needs_read);
     if (p->pattern && p->pattern->name) {
 	printf("  pattern      = %s\n", p->pattern->name);
     }
@@ -193,33 +196,33 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     	if (arg) param->jobs = atoi(arg);
     	break;
 #endif
-	case 'p':
-		param->pattern = get_pattern_from_name(arg);
-		if (!param->pattern) {
-			printf("pattern name unrecognized.\n");
-			param->pattern = &uniform_pattern;
-			return ARGP_ERR_UNKNOWN;
-		}
-		break;
-	case 'a':
-		param->access = get_access_from_name(arg);
-		if (!param->access) {
-			printf("access name unrecognized.\n");
-			param->access = &histogram_access;
-			return ARGP_ERR_UNKNOWN;
-		}
-		break;
-	case 't':
-		param->tsops = get_timestamp_from_name(arg);
-		if (!param->tsops) {
-			printf("timestamp name unrecognized.\n");
-			param->tsops = &rdtsc_ops;
-			return ARGP_ERR_UNKNOWN;
-		}
-		break;
-	case 'd':
-		if (arg) param->delay = atoi(arg);
-		break;
+    case 'p':
+	param->pattern = get_pattern_from_name(arg);
+	if (!param->pattern) {
+		printf("pattern name unrecognized.\n");
+		param->pattern = &uniform_pattern;
+		return ARGP_ERR_UNKNOWN;
+	}
+	break;
+    case 'a':
+	param->access = get_access_from_name(arg);
+	if (!param->access) {
+	    printf("access name unrecognized.\n");
+	    param->access = &histogram_access;
+	    return ARGP_ERR_UNKNOWN;
+	}
+	break;
+    case 't':
+	param->tsops = get_timestamp_from_name(arg);
+	if (!param->tsops) {
+		printf("timestamp name unrecognized.\n");
+		param->tsops = &rdtsc_ops;
+		return ARGP_ERR_UNKNOWN;
+	}
+	break;
+    case 'd':
+	if (arg) param->delay = atoi(arg);
+	break;
 #ifdef XALLOC
     case 'x':
     	if (arg) param->xalloc_mib = atoi(arg);
@@ -228,15 +231,15 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     	if (arg) param->xalloc_path = strdup(arg);
     	break;
 #endif
-	case 'e':
-		if (arg) param->shape = atof(arg);
-		break;
-	case 'q':
-		param->quiet = 1;
-		break;
-	case 'c':
-		param->cold = 1;
-		break;
+    case 'e':
+	if (arg) param->shape = atof(arg);
+	break;
+    case 'q':
+	param->quiet = 1;
+	break;
+    case 'c':
+	param->cold = 1;
+	break;
     case 'r':
     	param->ratio = (arg ? atoi(arg) : 50);
     	if (param->ratio < 0 || param->ratio > 100) { 
@@ -254,6 +257,9 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     	break;
     case 'h':
 	param->threshold = (arg ? atoi(arg) : 0);
+	break;
+    case 'z':
+	param->write_needs_read = 1;
 	break;
 #ifdef PMB_XML
     case 'f':
@@ -636,7 +642,7 @@ void* main_bm_thread(void* arg)
     uint64_t done_tsc, now;
 
     uint32_t* a_addr;
-    int is_write;
+    int is_write;   // 0: read, 1: write, 2: write after read
     uint32_t latency_ns;
 
     /* we upconvert ratio to 0-1023 scale to avoid modular op*/
@@ -688,6 +694,7 @@ void* main_bm_thread(void* arg)
 	    a_addr = calc_address(buf, pattern->get_next(ctx));
 	    a_addr += p->get_offset(&rand_ctx_offset);
 	    is_write = (roll_dice(&rand_ctx_action) % 1024) < rat_scaled ? 0 : 1;
+	    if (is_write && p->write_needs_read) is_write = 2;
 
 	    access->exercise(a_addr, is_write);
 	    // don't need to record, don't need to mark long lats
@@ -723,13 +730,14 @@ void* main_bm_thread(void* arg)
 	    a_addr = calc_address(buf, pattern->get_next(ctx));
 	    a_addr += p->get_offset(&rand_ctx_offset);
 	    is_write = (roll_dice(&rand_ctx_action) % 1024) < rat_scaled ? 0 : 1;
+	    if (is_write && p->write_needs_read) is_write = 2;
 
 	    latency_ns = access->exercise(a_addr, is_write);
+
 	    access->record(stats, latency_ns, is_write);
 #ifndef _WIN32
 	    if (params.threshold > 0) mark_long_latency(latency_ns);
 #endif
-
 	    if (p->delay > 10) sys_delay(p->delay);
 	}
 	tenk++;

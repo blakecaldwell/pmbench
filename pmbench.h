@@ -85,6 +85,7 @@ typedef struct parameters {
     int jobs;		// number of worker threads
     int init_garbage;
     int threshold;
+    int write_needs_read;// use write_after_read access method
 #ifdef XALLOC
     int xalloc_mib;	// positive xalloc_mib indicates we use xalloc instead of mmap
     char* xalloc_path;	// xalloc backend file pathname

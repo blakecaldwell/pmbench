@@ -20,9 +20,15 @@ xmlNodePtr sysmeminfonode = NULL;
 
 static xmlChar tempbuf[57];
 
+/* catch libxml header change */
+#if LIBXML_VERSION < 20904 
+  #define XFMT_TYPE (BAD_CAST)
+#else
+  #define XFMT_TYPE 
+#endif
 xmlChar* floatToXmlChar(double f)
 {
-    if (xmlStrPrintf(tempbuf, 57, "%0.4f", f) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, XFMT_TYPE"%0.4f", f) == -1) {
 	printf("floatToXmlChar(%f): Error\n", f);
 	return BAD_CAST "Error";
     }
@@ -31,7 +37,7 @@ xmlChar* floatToXmlChar(double f)
 
 xmlChar* signedIntToXmlChar(int64_t i)
 {
-    if (xmlStrPrintf(tempbuf, 57, "%"PRId64, i) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, XFMT_TYPE"%"PRId64, i) == -1) {
 	printf("signedIntToXmlChar(%"PRId64"): Error\n", i);
 	return BAD_CAST "Error";
     }
@@ -40,7 +46,7 @@ xmlChar* signedIntToXmlChar(int64_t i)
 
 xmlChar* unsignedIntToXmlChar(uint64_t i)
 {
-    if (xmlStrPrintf(tempbuf, 57, "%"PRIu64, i) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, XFMT_TYPE"%"PRIu64, i) == -1) {
 	printf("unsignedIntToXmlChar(%"PRIu64"): Error\n", i);
 	return BAD_CAST "Error";
     }
@@ -49,7 +55,7 @@ xmlChar* unsignedIntToXmlChar(uint64_t i)
 
 xmlChar* byteToXmlChar(uint8_t b)
 {
-    if (xmlStrPrintf(tempbuf, 57, "%02x", b) == -1) {
+    if (xmlStrPrintf(tempbuf, 57, XFMT_TYPE"%02x", b) == -1) {
 	printf("byteToXmlChar(%u): Error\n", b);
 	return BAD_CAST "Error";
     }

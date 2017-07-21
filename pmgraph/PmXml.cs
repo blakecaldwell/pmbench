@@ -1,5 +1,5 @@
 ﻿/*
-   Copyright (c) 2016, University of Nevada, Las Vegas
+   Copyright (c) 2016, 2017 University of Nevada, Las Vegas
    All rights reserved.
   
    Redistribution and use in source and binary forms, with or without
@@ -30,8 +30,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 using System.Xml;
@@ -1190,8 +1188,7 @@ public class CsvWriter
 	    outfile.Write(results_headers);
 	    report = SafeXmlParse.selNode(hn.rounds[h].roundNode,
 		    "pmbenchmark/report");
-	    for (int j = 1; j <= hn.rounds[h].jobs(); j++)
-	    {
+	    for (int j = 1; j <= hn.rounds[h].jobs(); j++) {
 		result = SafeXmlParse.selNode(report, "result/result_thread[@thread_num='" + j + "']");
 		outfile.Write
 		(
@@ -1605,7 +1602,7 @@ public class PivotChart
     {
 	private Series lastDrawn;
 
-	private Series initializeHoverSeries(Series s)
+	private Series initHoverSeries(Series s)
 	{
 	    s.ChartType = SeriesChartType.SplineArea;
 	    s.Enabled = false;
@@ -1628,13 +1625,13 @@ public class PivotChart
 	    lastDrawn = null;
 
 	    pivotchart.miniChart.Series.Add(name);
-	    miniSeries = initializeHoverSeries(pivotchart.miniChart.Series[name]);
+	    miniSeries = initHoverSeries(pivotchart.miniChart.Series[name]);
 
 	    pivotchart.fullChart.Series.Add(name);
-	    fullSeries = initializeHoverSeries(pivotchart.fullChart.Series[name]);
+	    fullSeries = initHoverSeries(pivotchart.fullChart.Series[name]);
 
 	    pivotchart.logChart.Series.Add(name);
-	    logSeries = initializeHoverSeries(pivotchart.logChart.Series[name]);
+	    logSeries = initHoverSeries(pivotchart.logChart.Series[name]);
 	    seriesName = name;
 	}
 
@@ -1781,8 +1778,7 @@ public class PivotChart
 	partnerSeries = new Dictionary<string, Binder>();
 
 	hover = null;
-	randomColorState = new Random(int.Parse("0ddfaced", 
-		    System.Globalization.NumberStyles.HexNumber));
+	randomColorState = new Random(0x0ddfaced);
 	selectionCount = 0;
 
 	harness = hn;
@@ -1813,6 +1809,7 @@ public class PivotChart
 
 	    Legend legend = new Legend();
 	    legend.Name = "Legend";
+	    legend.TextWrapThreshold = 60;
 	    legend.DockedToChartArea = "histogram";
 
 	    chart.ChartAreas.Add(chartarea);
@@ -1938,7 +1935,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    if (!iter.Current.selected) toggleSelection(iter.Current);
 	}
 
-	harness.pmgraph.updateSelectionButtons(selectionCount);
+	refreshSelectionColors();
     }
 
     public void selectNone()
@@ -1947,6 +1944,8 @@ Console.WriteLine("createHoverSeries(): already exists");
 	while (iter.MoveNext()) {
 	    if (iter.Current.selected) toggleSelection(iter.Current);
 	}
+
+	refreshSelectionColors();
     }
 
     private void chartMouseClick(object sender, EventArgs e)
@@ -2038,7 +2037,10 @@ Console.WriteLine("createHoverSeries(): already exists");
 
     private int getRandomColorState(bool read)
     {
-	return randomColorState.Next() | (read ? int.Parse("ff0000a0", System.Globalization.NumberStyles.HexNumber) : int.Parse("ffff0000", System.Globalization.NumberStyles.HexNumber));
+	unchecked {
+	return randomColorState.Next() | 
+	    (read ? (int)0xff0000a0u : (int)0xffff0000u);
+	}
     }
 
     /*
@@ -2085,77 +2087,61 @@ Console.WriteLine("createHoverSeries(): already exists");
 	return series;
     }
 
-    public void addSeries(BenchRound br)
+    private Binder addSeriesBody(BenchRound br, Access type)
     {
 	Series series;
 	Binder bs;
 	Color color;
 
+	bs = new Binder();
+	bs.theBenchRound = br;
+	color = getColor(734, type);
+
+	// add mini series
+	series = produceSeries(br, DetailLevel.mini, type);
+	bs.miniSeries = series;
+	miniChart.Series.Add(series);
+
+	// add full series
+	series = produceSeries(br, DetailLevel.full, type);
+	bs.fullSeries = series;
+	fullChart.Series.Add(series);
+
+	// add log series
+	series = produceSeries(br, DetailLevel.full, type);
+	massageDataPoints(series); // zero to 1 for log drawing
+	bs.logSeries = series;
+	logChart.Series.Add(series);
+
+	bs.seriesName = series.Name;
+	bs.myAccessType = type;
+	bs.activeColor = color;
+	bs.setColor(bs.activeColor);
+	
+	allSeries[series.Name] = bs;
+	return bs;
+    }
+
+    public void addSeries(BenchRound br)
+    {
+	Binder bs;
+
 	if (br.ratio() > 0) {	// read data exist
-	    bs = new Binder();
-	    bs.theBenchRound = br;
-	    color = getColor(734, Access.read);
-
-	    // add mini series
-	    series = produceSeries(br, DetailLevel.mini, Access.read);
-	    bs.miniSeries = series;
-	    miniChart.Series.Add(series);
-
-	    // add full series
-	    series = produceSeries(br, DetailLevel.full, Access.read);
-	    bs.fullSeries = series;
-	    fullChart.Series.Add(series);
-
-	    // add log series
-	    series = produceSeries(br, DetailLevel.full, Access.read);
-	    massageDataPoints(series); // zero to 1 for log drawing
-	    bs.logSeries = series;
-	    logChart.Series.Add(series);
-
-	    bs.seriesName = series.Name;
-	    bs.myAccessType = Access.read;
-	    bs.activeColor = color;
-	    bs.setColor(bs.activeColor);
+	    bs = addSeriesBody(br, Access.read);
 	    
-	    allSeries[series.Name] = bs;
-
 	    // populating partnerSeries information
 	    if (br.ratio() >= 100) {
 		; // don't have partner series..
 	    } else {
-		// below hack relies on how we name series..
+		// XXX below hack relies on how we name series..
 		string pname = br.customName + " (write)";
 		partnerSeries.Add(pname, bs);
 	    }
 	}
 
 	if (br.ratio() < 100) {  // write data exist
-	    bs = new Binder();
-	    bs.theBenchRound = br;
-	    color = getColor(734, Access.write);
+	    bs = addSeriesBody(br, Access.write);
 
-	    // add mini series
-	    series = produceSeries(br, DetailLevel.mini, Access.write);
-	    bs.miniSeries = series;
-	    miniChart.Series.Add(series);
-	    
-	    // add full series
-	    series = produceSeries(br, DetailLevel.full, Access.write);
-	    bs.fullSeries = series;
-	    fullChart.Series.Add(series);
-	    
-	    // add log series
-	    series = produceSeries(br, DetailLevel.full, Access.write);
-	    massageDataPoints(series); // zero to 1 for log drawing
-	    bs.logSeries = series;
-	    logChart.Series.Add(series);
-
-	    bs.seriesName = series.Name;
-	    bs.myAccessType = Access.write;
-	    bs.activeColor = color;
-	    bs.setColor(bs.activeColor);
-	    
-	    allSeries[series.Name] = bs;
 	    // populating partnerSeries information
 	    if (br.ratio() <= 0) {
 		; // don't have partner series..

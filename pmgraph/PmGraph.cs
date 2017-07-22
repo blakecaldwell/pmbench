@@ -47,7 +47,8 @@ public class ControlPanel : FlowLayoutPanel
 
     private Button screenshotButton;
     private Button aboutButton;
-    private Button testErrorButton;
+    private Button debugDumpInternalButton;
+    private Button debugRebuildChartButton;
 
     private RadioButton[] selectChart;
     private Panel chartSelectPanel;
@@ -63,7 +64,9 @@ public class ControlPanel : FlowLayoutPanel
     private void easteregg(int id)
     {
 	if (debugenable_state == 2 && id == 2)  {
-	    this.Controls.Add(testErrorButton);
+	    debugenable_state = 3;
+	    this.Controls.Add(debugDumpInternalButton);
+	    this.Controls.Add(debugRebuildChartButton);
 	    return;
 	}
 	if (id == 1 && debugenable_state == 0) {
@@ -74,6 +77,7 @@ public class ControlPanel : FlowLayoutPanel
 	    debugenable_state = 2;
 	    return;
 	}
+	if (debugenable_state == 3) return;
 
 	debugenable_state = 0;
     }
@@ -160,13 +164,18 @@ public class ControlPanel : FlowLayoutPanel
 		about_click, true);
 	Controls.Add(aboutButton);
 
-	testErrorButton = initButton("debug dump", 
+	debugDumpInternalButton = initButton("debug dump", 
 		pmgraph.testError_click, true);
-	Controls.Add(testErrorButton);
-	Controls.Remove(testErrorButton);
+	debugRebuildChartButton = initButton("redraw chart", 
+		pmgraph.rebuildChart_click, true);
 
 	selectAllButton.Enabled = true;
 	exportManualButton.Enabled = false;
+    }
+
+    public void selectChartRadioFull()
+    {
+	selectChart[1].Checked = true;
     }
 
     private static Button initButton(string text, EventHandler e, bool enable)
@@ -491,6 +500,13 @@ public partial class PmGraph : System.Windows.Forms.Form
 	} catch (NullReferenceException) {
 	    Console.WriteLine("Null reference manual.thePivotChart.testerror_dumpChartSeries()");
 	}
+    }
+
+    public void rebuildChart_click(object sender, EventArgs e)
+    {
+	redrawManual();
+	controlPanel.selectChartRadioFull();
+	
     }
 
 }   //PmGraph

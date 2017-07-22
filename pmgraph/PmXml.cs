@@ -37,8 +37,8 @@ using System.Xml;
 namespace PmGraphNS
 {
 
-public enum Access { uninitialized = -1, read = 0, write = 1 }
-public enum DetailLevel { uninitialized = -1, mini = 0, full = 1 }
+public enum Access { read = 0, write = 1 }
+public enum DetailLevel { mini = 0, full = 1 }
 
 public static class SafeXmlParse
 {
@@ -1337,7 +1337,7 @@ out_ret_0:
 }   // CsvWriter
 
 
-//
+//////////////////////////////////
 // Xml data importer for PivotChart 
 // 
 public static class XmlToSeries
@@ -1353,13 +1353,13 @@ public static class XmlToSeries
 	    double interval_hi,
 	    Series series)
     {
-	//get the midpoint between interval values
+	// get the midpoint between interval values
 	double interval_ = (interval_hi - interval_lo) / 16;
-	for (int j = 0; j < 16; j++) //graph it (involves retrieving bucket sub hex index), skipping nodes with no samples
-	{
+
+	// graph it (involves retrieving bucket sub hex index)
+	for (int j = 0; j < 16; j++) {
 	    double hex = SafeXmlParse.toDouble(bucket,
 		    "bucket_hexes/hex[@index='" + j + "']");
-	    //if (hex == 0) { continue; }
 	    double xval = interval_lo + (0.5 + j) * interval_;
 	    series.Points.AddXY(xvalToSec(xval), hex);
 	}
@@ -1377,6 +1377,35 @@ public static class XmlToSeries
 	double xval = interval_lo + (interval_ / 2);
 	series.Points.AddXY(xvalToSec(xval), sum_count);
     }
+
+    /*
+     * this is needed to avoid misreprenting the area due to sparse data point
+     * in the high latency samples.
+     * todo: may need smoothing out the distribution..
+     */
+    private static void writeSumCountOnlyToChart_interpolate(XmlNode bucket, Series series)
+    {
+	double sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
+
+	if (sum_count == 0) return;
+	double interval_lo = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_lo");
+	double interval_hi = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_hi");
+	double delta = (interval_hi - interval_lo)/ 16;
+
+	// don't smooth out when we have low sample count
+	if (sum_count <= 32) {
+	    for (int i = 0; i < 16; i++) {
+		double xval = interval_lo + i * delta;
+		series.Points.AddXY(xvalToSec(xval), 
+			i == 8 ? sum_count : 0);
+	    }
+	} else {
+	    for (int i = 0; i < 16; i++) {
+		double xval = interval_lo + i * delta;
+		series.Points.AddXY(xvalToSec(xval), sum_count / 16);
+	    }
+	}
+    }
     
     private static void getHisto_body(
 	    Series series, 
@@ -1390,8 +1419,9 @@ public static class XmlToSeries
 	if (histogram == null) return; // nothing in there..
 
 	XmlNode bucket;
-	double interval_lo, interval_hi, sum_count;
 	XmlNodeList bucket0;
+
+	double interval_lo, interval_hi, sum_count;
 
 	series.Name = sname;
 
@@ -1423,12 +1453,18 @@ public static class XmlToSeries
 	}
 	
 	//deal with the rest of the index 0 histo buckets
-	for (int i = 1; i < bucket0.Count; i++) {
-	    bucket = bucket0.Item(i);
-	    writeSumCountOnlyToChart(bucket, series);
+	if (full) {
+	    for (int i = 1; i < bucket0.Count; i++) {
+		bucket = bucket0.Item(i);
+		writeSumCountOnlyToChart_interpolate(bucket, series);
+		//writeSumCountOnlyToChart(bucket, series);
+	    }
+	} else {
+	    for (int i = 1; i < bucket0.Count; i++) {
+		bucket = bucket0.Item(i);
+		writeSumCountOnlyToChart(bucket, series);
+	    }
 	}
-	bucket = null;
-	bucket0 = null;
     }
 
     public static void getHisto(Series[] serial, XmlNode stats, bool full)
@@ -1440,10 +1476,8 @@ public static class XmlToSeries
 }   // XmlToSeries
 
 
-///////////
-// This is new class factored out from PivotChart.
-// This class is the one that has a copy of datapoints.
-///////////
+////////////////////////////////////////////////
+// This class is the one that has a copy of datapoints for Chart
 public class PlotPoints
 {
     private Series[] mini;
@@ -1510,7 +1544,6 @@ public class PivotChart
 
 	public Binder()
 	{
-	    myAccessType = Access.uninitialized;
 	    selected = false;
 	    grayed = false;
 	    activeColor = unselectedColor;
@@ -1965,10 +1998,10 @@ Console.WriteLine("createHoverSeries(): already exists");
 	LegendItem li = htr.Object as LegendItem;
 
 	switch (mouseargs.Button) {
-	case (MouseButtons.Middle):
+	case MouseButtons.Middle:
 	    allSeries[li.SeriesName].theBenchRound.seriesObject.displaySpikes();
 	    break;
-	case (MouseButtons.Left):
+	case MouseButtons.Left:
 	    Binder bs_a = allSeries[li.SeriesName];
 	    toggleSelection(bs_a); 
 
@@ -1979,7 +2012,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 
 	    refreshSelectionColors();
 	    break;
-	case (MouseButtons.Right):
+	case MouseButtons.Right:
 	    break;
 	}
     }
@@ -2379,6 +2412,8 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
 
 	if (rounds.Count == 0) {
 	    thePivotChart.setAllLinearX();
+	} else {
+	    thePivotChart.setAllLogX();
 	}
 
 	thePivotChart.createHoverSeries();
@@ -2427,9 +2462,4 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
 
 }   // Harness
 
-
 } // namespace PmGraphSpace
-
-
-/*
-    */

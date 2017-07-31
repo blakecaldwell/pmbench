@@ -40,7 +40,30 @@ namespace PmGraphNS
 public enum Access { read = 0, write = 1 }
 public enum DetailLevel { mini = 0, full = 1 }
 
-public static class SafeXmlParse
+public static class UncheckedXmlParse
+{
+    public static XmlNode selNode(XmlNode where, string xpath)
+    {
+	return where.SelectSingleNode(xpath);
+    }
+
+    public static long toLong(XmlNode where, string xpath)
+    {
+	return long.Parse(selNode(where, xpath).InnerText);
+    }
+
+    public static int toInt(XmlNode where, string xpath) 
+    {
+	return int.Parse(selNode(where, xpath).InnerText);
+    }
+
+    public static double toDouble(XmlNode where, string xpath)
+    {
+	return double.Parse(selNode(where, xpath).InnerText);
+    }
+}
+
+public static class DebugXmlParse
 {
     // oldname: safeSelectSingleNode(XmlNode where, string xpath)
     public static XmlNode selNode(XmlNode where, string xpath)
@@ -131,8 +154,19 @@ public static class SafeXmlParse
 	    return 0;
 	}
     }
-}   // SafeXmlParse
+}   // DebugXmlParse
 
+public static class XmlParse
+{
+    public static XmlNode selNode(XmlNode where, string xpath)
+    { return UncheckedXmlParse.selNode(where, xpath); }
+    public static long toLong(XmlNode where, string xpath)
+    { return UncheckedXmlParse.toLong(where, xpath); }
+    public static int toInt(XmlNode where, string xpath) 
+    { return UncheckedXmlParse.toInt(where, xpath); }
+    public static double toDouble(XmlNode where, string xpath)
+    { return UncheckedXmlParse.toDouble(where, xpath); }
+}
 
 public class BenchRound
 {
@@ -177,21 +211,7 @@ public class BenchRound
 	return false;
     }
 
-    public BenchRound()
-    {
-	roundNode = null;
-	seriesObject = null;
-	plotPoints = null;
-	readDeleteFlag = false;
-	writeDeleteFlag = false;
-	readSeriesName = null;
-	writeSeriesName = null;
-	flaggedForAverage = false;
-	customName = null;
-	hasPendingDeletions = false;
-	hasReadSeries = false;
-	hasWriteSeries = false;
-    }
+    public BenchRound() { ;}
 
     public BenchRound(BenchSiblings bench, XmlNode node, int i)
     {
@@ -221,15 +241,15 @@ public class BenchRound
 	XmlNodeList meminfos = roundNode.SelectNodes("pmbenchmark/report/sys_mem_info/sys_mem_item");
 	for (int i = 0; i < meminfos.Count - 1; i++)
 	{
-	    a = SafeXmlParse.selNode(meminfos[i], "mem_item_info");
-	    b = SafeXmlParse.selNode(meminfos[i + 1], "mem_item_info");
-	    delta = SafeXmlParse.selNode(meminfos[i], "mem_item_delta");
+	    a = XmlParse.selNode(meminfos[i], "mem_item_info");
+	    b = XmlParse.selNode(meminfos[i + 1], "mem_item_info");
+	    delta = XmlParse.selNode(meminfos[i], "mem_item_delta");
 	    for (int j = 0; j < memstrings_w.Length; j++)
 
 	    {
 		{
 		    dirtyDelta = true;
-		    SafeXmlParse.selNode(delta, memstrings_w[j]).InnerText = (SafeXmlParse.toLong(b, memstrings_w[j]) - SafeXmlParse.toLong(a, memstrings_w[j])).ToString();
+		    XmlParse.selNode(delta, memstrings_w[j]).InnerText = (XmlParse.toLong(b, memstrings_w[j]) - XmlParse.toLong(a, memstrings_w[j])).ToString();
 		}
 	    }
 	}
@@ -337,6 +357,21 @@ public class BenchRound
 	    return 0;
 	}
     }
+
+    public double[] calculateTimeSpent(double[] zones, Access type)
+    {
+	XmlNode nodeStat = XmlParse.selNode(roundNode, 
+		"pmbenchmark/report/statistics");
+
+	string sname = (type == Access.read) ? "read" : "write";
+
+	XmlNode nodeHisto = XmlParse.selNode(nodeStat,
+		"histogram[@type='" + sname + "']");
+
+	if (nodeHisto == null) return null; 
+
+	return XmlToSeries.getRuntime(nodeHisto, zones);
+    }
 }   // BenchRound
 
 
@@ -388,16 +423,16 @@ public class BenchSiblings
 
 	// split read/write cases as we can have read-only or write-only runs
 	for (int i = 0; i < readbuckets.Count; i++) {
-	    double tempSpike = SafeXmlParse.toDouble(readbuckets[i], "sum_count");
+	    double tempSpike = XmlParse.toDouble(readbuckets[i], "sum_count");
 	    if (tempSpike > readSpike) {
 		readSpike = tempSpike;
-		readSpikeIntervalHi = SafeXmlParse.toInt(readbuckets[i], "bucket_interval/interval_hi");
+		readSpikeIntervalHi = XmlParse.toInt(readbuckets[i], "bucket_interval/interval_hi");
 	    }
 
 	    if (readbuckets[i].Attributes.Item(0).Name.Equals("index") 
 		 && !readbuckets[i].Attributes.Item(0).Value.Equals("0")) {
 		for (int j = 0; j < 16; j++) {
-		    double hexbin = SafeXmlParse.toDouble(readbuckets[i], "bucket_hexes/hex[@index='" + j + "']");
+		    double hexbin = XmlParse.toDouble(readbuckets[i], "bucket_hexes/hex[@index='" + j + "']");
 		    if (hexbin > readSpikeHexVal) {
 			readSpikeHexVal = hexbin;
 			readSpikeHexBinNum = j;
@@ -407,15 +442,15 @@ public class BenchSiblings
 	}
 
 	for (int i = 0; i < writebuckets.Count; i++) {
-	    double tempSpike = SafeXmlParse.toDouble(writebuckets[i], "sum_count");
+	    double tempSpike = XmlParse.toDouble(writebuckets[i], "sum_count");
 	    if (tempSpike > writeSpike) {
 		writeSpike = tempSpike;
-		writeSpikeIntervalHi = SafeXmlParse.toInt(writebuckets[i], "bucket_interval/interval_hi");
+		writeSpikeIntervalHi = XmlParse.toInt(writebuckets[i], "bucket_interval/interval_hi");
 	    }
 	    if (writebuckets[i].Attributes.Item(0).Name.Equals("index") 
 		&& !writebuckets[i].Attributes.Item(0).Value.Equals("0")) {
 		for (int j = 0; j < 16; j++) {
-		    double hexbin = SafeXmlParse.toDouble(writebuckets[i], "bucket_hexes/hex[@index='" + j + "']");
+		    double hexbin = XmlParse.toDouble(writebuckets[i], "bucket_hexes/hex[@index='" + j + "']");
 		    if (hexbin > writeSpikeHexVal) {
 			writeSpikeHexVal = hexbin;
 			writeSpikeHexBinNum = j;
@@ -519,9 +554,9 @@ public class BenchSiblings
 	if (doc == null) doc = parent.OwnerDocument;
 	XmlNode result1, statistics, sys_mem_info, report_temp, pmb_temp;
 	string report_s = "test_round[@iter='1']/pmbenchmark/report/";
-	result1 = SafeXmlParse.selNode(parent, report_s + "result").Clone();
-	statistics = SafeXmlParse.selNode(parent, report_s + "statistics").Clone();
-	sys_mem_info = SafeXmlParse.selNode(parent, report_s + "sys_mem_info").Clone();
+	result1 = XmlParse.selNode(parent, report_s + "result").Clone();
+	statistics = XmlParse.selNode(parent, report_s + "statistics").Clone();
+	sys_mem_info = XmlParse.selNode(parent, report_s + "sys_mem_info").Clone();
 	report_temp = doc.CreateNode(XmlNodeType.Element, "report", doc.NamespaceURI); //VERY IMPORTANT LESSON: using the wrong namespace will cause seemingly impossible shit like node.SelectSingleNode(node.FirstChild.Name) returning null
 	report_temp.AppendChild(result1);
 	report_temp.AppendChild(statistics);
@@ -545,12 +580,12 @@ public class BenchSiblings
 	    int trials)
     {
 	try {
-	    double t = SafeXmlParse.toDouble(item_avg, s);
-	    t += SafeXmlParse.toDouble(item_, s);
+	    double t = XmlParse.toDouble(item_avg, s);
+	    t += XmlParse.toDouble(item_, s);
 	    if (i == trials) {
 		t /= (float)trials;
 	    }
-	    SafeXmlParse.selNode(item_avg, s).InnerText = t.ToString();
+	    XmlParse.selNode(item_avg, s).InnerText = t.ToString();
 	}
 	catch (NullReferenceException x) {
 	    MB.S("addMemItemField: Adding field " + s + 
@@ -588,7 +623,7 @@ public class BenchSiblings
 	for (int j = 1; j <= 15; j++) {
 	    //get node 6's bucket
 	    try {
-		bucket_avg = SafeXmlParse.selNode(histo_avg, "histo_bucket[@index='" + j + "']");
+		bucket_avg = XmlParse.selNode(histo_avg, "histo_bucket[@index='" + j + "']");
 	    }
 	    catch (Exception x) {
 		MB.S("Error: selecting bucket " + j + " in histo_avg:\n" + x.ToString());
@@ -597,7 +632,7 @@ public class BenchSiblings
 
 	    //get test node's bucket
 	    try {
-		bucket = SafeXmlParse.selNode(histo, "histo_bucket[@index='" + j + "']");
+		bucket = XmlParse.selNode(histo, "histo_bucket[@index='" + j + "']");
 	    }
 	    catch (Exception x) {
 		MB.S("Error: selecting bucket " + j + " in histo:\n" + x.ToString());
@@ -606,7 +641,7 @@ public class BenchSiblings
 
 	    //get sum_count from node 6's bucket
 	    try {
-		sum_temp = SafeXmlParse.toDouble(bucket_avg, "sum_count");
+		sum_temp = XmlParse.toDouble(bucket_avg, "sum_count");
 	    }
 	    catch (Exception x) {
 		MB.S("Error: retrieving/parsing sum_temp of bucket_avg " + j + ":\n" + x.ToString());
@@ -615,7 +650,7 @@ public class BenchSiblings
 
 	    //add sum_count from test node's bucket
 	    try {
-		term_temp = SafeXmlParse.toDouble(bucket, "sum_count");
+		term_temp = XmlParse.toDouble(bucket, "sum_count");
 	    }
 	    catch (Exception x) {
 		MB.S("Error: parsing/adding sum_temp of bucket " + j + ":\n" + x.ToString());
@@ -629,7 +664,7 @@ public class BenchSiblings
 
 	    //update node 6's bucket
 	    try {
-		SafeXmlParse.selNode(bucket_avg, "sum_count").InnerText = sum_temp.ToString();
+		XmlParse.selNode(bucket_avg, "sum_count").InnerText = sum_temp.ToString();
 	    }
 	    catch (Exception x) {
 		MB.S("Error updating sum for bucket " + j + " in histo_avg:\n" + x.ToString());
@@ -740,9 +775,9 @@ public class BenchSiblings
 	string report_s = "pmbenchmark/report";
 	try {
 	    string params_s = "test_round/" + report_s + "/signature/params/";
-	    ratio = SafeXmlParse.toInt(seriesNode, params_s + "ratio");
-	    jobs = SafeXmlParse.toInt(seriesNode, params_s + "jobs");
-	    cold = SafeXmlParse.toInt(seriesNode, params_s + "cold");
+	    ratio = XmlParse.toInt(seriesNode, params_s + "ratio");
+	    jobs = XmlParse.toInt(seriesNode, params_s + "jobs");
+	    cold = XmlParse.toInt(seriesNode, params_s + "cold");
 	}
 	catch (Exception x) { 
 	    MB.S("makeAverageNode: unable to retrieve ratio parameter:" + x.ToString());
@@ -754,7 +789,7 @@ cold += 0; //  suppress unused variable warning
 
 	string result_s = report_s + "/result";
 	string meminfo_s = report_s + "/sys_mem_info/sys_mem_item";
-	result_avg = SafeXmlParse.selNode(avg, result_s);
+	result_avg = XmlParse.selNode(avg, result_s);
 	sys_mem_items_avg = avg.SelectNodes(meminfo_s);
 	string histo_s = report_s + "/statistics/histogram";
 	string round_s;
@@ -762,18 +797,18 @@ cold += 0; //  suppress unused variable warning
 	{
 	    round_s = "test_round[@iter = '" + i + "']";
 	    //average the individual thread results
-	    result_ = SafeXmlParse.selNode(seriesNode, round_s + "/" + result_s);
+	    result_ = XmlParse.selNode(seriesNode, round_s + "/" + result_s);
 	    for (int j = 1; j <= jobs; j++)
 	    {
-		thread_avg = SafeXmlParse.selNode(result_avg, "result_thread[@thread_num='" + j + "']");
-		thread_ = SafeXmlParse.selNode(result_, "result_thread[@thread_num='" + j + "']");
+		thread_avg = XmlParse.selNode(result_avg, "result_thread[@thread_num='" + j + "']");
+		thread_ = XmlParse.selNode(result_, "result_thread[@thread_num='" + j + "']");
 		addThreadResults(thread_avg, thread_, i, trialsPerSeries);
 	    }
 	    //average the histograms
 	    if (ratio > 0) //deal with read histogram here
 	    {
-		histo_avg = SafeXmlParse.selNode(avg, histo_s + "[@type='read']");
-		histo = SafeXmlParse.selNode(seriesNode, round_s + "/" + histo_s + "[@type='read']");
+		histo_avg = XmlParse.selNode(avg, histo_s + "[@type='read']");
+		histo = XmlParse.selNode(seriesNode, round_s + "/" + histo_s + "[@type='read']");
 		if (!addHistograms(histo_avg, histo, i, trialsPerSeries)) {
 		    MB.S("makeAverageNode: Error adding read histograms");
 		    return null;
@@ -782,12 +817,12 @@ cold += 0; //  suppress unused variable warning
 
 	    if (ratio < 100)
 	    {
-		histo_avg = SafeXmlParse.selNode(avg, histo_s + "[@type='write']");
+		histo_avg = XmlParse.selNode(avg, histo_s + "[@type='write']");
 		if (histo_avg == null) {
 		    MB.S("makeAverageNode: This series of benches (at " + avg.Name + ") have no write histograms at " + histo_s + "[@type='write']" + ", apparently ");
 		    return null;
 		}
-		histo = SafeXmlParse.selNode(seriesNode, round_s + "/" + histo_s + "[@type='write']");
+		histo = XmlParse.selNode(seriesNode, round_s + "/" + histo_s + "[@type='write']");
 		if (!addHistograms(histo_avg, histo, i, trialsPerSeries)) {
 		    MB.S("makeAverageNode: adding write histograms");
 		    return null;
@@ -798,13 +833,13 @@ cold += 0; //  suppress unused variable warning
 	    sys_mem_items_ = seriesNode.SelectNodes(round_s + "/" + meminfo_s);
 	    for (int j = 0; j < sys_mem_items_avg.Count; j++)
 	    {
-		item_avg = SafeXmlParse.selNode(sys_mem_items_avg.Item(j), "mem_item_info");
-		item_ = SafeXmlParse.selNode(sys_mem_items_.Item(j), "mem_item_info");
+		item_avg = XmlParse.selNode(sys_mem_items_avg.Item(j), "mem_item_info");
+		item_ = XmlParse.selNode(sys_mem_items_.Item(j), "mem_item_info");
 		addMemItems(item_avg, item_, i, trialsPerSeries);
 		if (j != sys_mem_items_avg.Count - 1)
 		{
-		    item_avg = SafeXmlParse.selNode(sys_mem_items_avg.Item(j), "mem_item_delta");
-		    item_ = SafeXmlParse.selNode(sys_mem_items_.Item(j), "mem_item_delta");
+		    item_avg = XmlParse.selNode(sys_mem_items_avg.Item(j), "mem_item_delta");
+		    item_ = XmlParse.selNode(sys_mem_items_.Item(j), "mem_item_delta");
 		    addMemItems(item_avg, item_, i, trialsPerSeries);
 		}
 	    }
@@ -858,19 +893,19 @@ public class ParamSet
 	    MB.S("setParamsFromNode: received null input node");
 	    return;
 	}
-	duration = SafeXmlParse.toInt(p, "duration");
-	valueMapsize = SafeXmlParse.toInt(p, "mapsize");
-	setsize = SafeXmlParse.toInt(p, "setsize");
-	valueJobs = SafeXmlParse.toInt(p, "jobs");
-	valueDelay = SafeXmlParse.toInt(p, "delay");
-	valueRatio = SafeXmlParse.toInt(p, "ratio");
-	shape = SafeXmlParse.selNode(p, "shape").InnerText;
-	quiet = SafeXmlParse.toInt(p, "quiet");
-	cold = SafeXmlParse.toInt(p, "cold");
-	offset = SafeXmlParse.toInt(p, "offset");
-	pattern = SafeXmlParse.selNode(p, "pattern").InnerText;
-	access = SafeXmlParse.selNode(p, "access").InnerText;
-	tsops = SafeXmlParse.selNode(p, "tsops").InnerText;
+	duration = XmlParse.toInt(p, "duration");
+	valueMapsize = XmlParse.toInt(p, "mapsize");
+	setsize = XmlParse.toInt(p, "setsize");
+	valueJobs = XmlParse.toInt(p, "jobs");
+	valueDelay = XmlParse.toInt(p, "delay");
+	valueRatio = XmlParse.toInt(p, "ratio");
+	shape = XmlParse.selNode(p, "shape").InnerText;
+	quiet = XmlParse.toInt(p, "quiet");
+	cold = XmlParse.toInt(p, "cold");
+	offset = XmlParse.toInt(p, "offset");
+	pattern = XmlParse.selNode(p, "pattern").InnerText;
+	access = XmlParse.selNode(p, "access").InnerText;
+	tsops = XmlParse.selNode(p, "tsops").InnerText;
     }
 
     public void setKey1IndicesFromKey(string key1)
@@ -986,16 +1021,16 @@ public class CsvWriter
     {
 	outfile.Write
 	(
-	    SafeXmlParse.selNode(info, "free_kib").InnerText + "," +
-	    SafeXmlParse.selNode(info, "buffer_kib").InnerText + "," +
-	    SafeXmlParse.selNode(info, "cache_kib").InnerText + "," +
-	    SafeXmlParse.selNode(info, "active_kib").InnerText + "," +
-	    SafeXmlParse.selNode(info, "inactive_kib").InnerText + "," +
-	    SafeXmlParse.selNode(info, "pgpgin").InnerText + "," +
-	    SafeXmlParse.selNode(info, "pgpgout").InnerText + "," +
-	    SafeXmlParse.selNode(info, "pswpin").InnerText + "," +
-	    SafeXmlParse.selNode(info, "pswpout").InnerText + "," +
-	    SafeXmlParse.selNode(info, "pgmajfault").InnerText + "\n"
+	    XmlParse.selNode(info, "free_kib").InnerText + "," +
+	    XmlParse.selNode(info, "buffer_kib").InnerText + "," +
+	    XmlParse.selNode(info, "cache_kib").InnerText + "," +
+	    XmlParse.selNode(info, "active_kib").InnerText + "," +
+	    XmlParse.selNode(info, "inactive_kib").InnerText + "," +
+	    XmlParse.selNode(info, "pgpgin").InnerText + "," +
+	    XmlParse.selNode(info, "pgpgout").InnerText + "," +
+	    XmlParse.selNode(info, "pswpin").InnerText + "," +
+	    XmlParse.selNode(info, "pswpout").InnerText + "," +
+	    XmlParse.selNode(info, "pgmajfault").InnerText + "\n"
 	);
     }
 
@@ -1003,11 +1038,11 @@ public class CsvWriter
     {
 	outfile.Write
 	(
-	    SafeXmlParse.selNode(info, "AvailPhys").InnerText + "," +
-	    SafeXmlParse.selNode(info, "dwMemoryLoad").InnerText + "," +
-	    SafeXmlParse.selNode(info, "TotalPageFile").InnerText + "," +
-	    SafeXmlParse.selNode(info, "AvailPageFile").InnerText + "," +
-	    SafeXmlParse.selNode(info, "AvailVirtual").InnerText + "\n"
+	    XmlParse.selNode(info, "AvailPhys").InnerText + "," +
+	    XmlParse.selNode(info, "dwMemoryLoad").InnerText + "," +
+	    XmlParse.selNode(info, "TotalPageFile").InnerText + "," +
+	    XmlParse.selNode(info, "AvailPageFile").InnerText + "," +
+	    XmlParse.selNode(info, "AvailVirtual").InnerText + "\n"
 	);
     }
 
@@ -1022,7 +1057,7 @@ public class CsvWriter
 	    double gap2 = gap1 + mid;
 	    outfile.Write(gap1 + "," + gap2 + ",");
 	    for (int k = 0; k < nodes.Count; k++) {
-		outfile.Write(SafeXmlParse.toDouble(nodes[k], "histo_bucket[@index='" + i + "']/bucket_hexes/hex[@index='" + j + "']"));
+		outfile.Write(XmlParse.toDouble(nodes[k], "histo_bucket[@index='" + i + "']/bucket_hexes/hex[@index='" + j + "']"));
 		if (k == nodes.Count - 1) {
 		    outfile.Write("\n");
 		} else {
@@ -1052,13 +1087,13 @@ public class CsvWriter
 	}
 	try {
 //            int bucket_index = int.Parse(buckets[0].Attributes.Item(0).Value);
-	    double lo, hi, interval_hi = SafeXmlParse.toInt(buckets[0], "bucket_interval/interval_hi");
-	    double interval_lo = SafeXmlParse.toInt(buckets[0], "bucket_interval/interval_lo");
+	    double lo, hi, interval_hi = XmlParse.toInt(buckets[0], "bucket_interval/interval_hi");
+	    double interval_lo = XmlParse.toInt(buckets[0], "bucket_interval/interval_lo");
 	    lo = Math.Pow(2, interval_lo);
 	    hi = Math.Pow(2, interval_hi);
 	    outfile.Write(lo + "," + hi + ",");
 	    for (int j = 0; j < buckets.Length; j++) {
-		outfile.Write(SafeXmlParse.toDouble(buckets[j], "sum_count"));
+		outfile.Write(XmlParse.toDouble(buckets[j], "sum_count"));
 		if (j == buckets.Length - 1) {
 		    outfile.Write("\n");
 		} else {
@@ -1085,14 +1120,14 @@ public class CsvWriter
 	    //bucket0s[i] contains all of the bucket 0's for round i
 	    bucket0s[i] = nodes[i].SelectNodes("histo_bucket[@index='0']");
 
-	    if ( SafeXmlParse.toInt(bucket0s[i].Item(0),
+	    if ( XmlParse.toInt(bucket0s[i].Item(0),
 			"bucket_interval/interval_lo") 
 		    != 0)
 	    {
 		MB.S("writePivotHistogramList: missing hit_counts_sum on test round " + i + 1);
 	    }
 
-	    outfile.Write(SafeXmlParse.toDouble(bucket0s[i].Item(0), "sum_count"));
+	    outfile.Write(XmlParse.toDouble(bucket0s[i].Item(0), "sum_count"));
 	    if (i == nodes.Count - 1) {
 		outfile.Write("\n");
 	    } else {
@@ -1106,7 +1141,7 @@ public class CsvWriter
 	    } else {
 		XmlNode[] buckets = new XmlNode[nodes.Count];
 		for (int k = 0; k < nodes.Count; k++) {
-		    buckets[k] = SafeXmlParse.selNode(nodes[k], "histo_bucket[@index='" + i + "']");
+		    buckets[k] = XmlParse.selNode(nodes[k], "histo_bucket[@index='" + i + "']");
 		}
 		writeSumCounts(buckets);
 	    }
@@ -1186,20 +1221,20 @@ public class CsvWriter
 	for (int h = 0; h < hn.rounds.Count; h++) {
 	    outfile.Write(getPivotDumpHeader(h, hn) + ",");
 	    outfile.Write(results_headers);
-	    report = SafeXmlParse.selNode(hn.rounds[h].roundNode,
+	    report = XmlParse.selNode(hn.rounds[h].roundNode,
 		    "pmbenchmark/report");
 	    for (int j = 1; j <= hn.rounds[h].jobs(); j++) {
-		result = SafeXmlParse.selNode(report, "result/result_thread[@thread_num='" + j + "']");
+		result = XmlParse.selNode(report, "result/result_thread[@thread_num='" + j + "']");
 		outfile.Write
 		(
 		    " ," + j + "," +
-		    SafeXmlParse.toDouble(result, "result_netavg/netavg_us") + "," +
-		    SafeXmlParse.toDouble(result, "result_netavg/netavg_clk") + "," +
-		    SafeXmlParse.toDouble(result, "result_details/details_latency/latency_us") + "," +
-		    SafeXmlParse.toDouble(result, "result_details/details_latency/latency_clk") + "," +
-		    SafeXmlParse.toDouble(result, "result_details/details_samples") + "," +
-		    SafeXmlParse.toDouble(result, "result_details/details_overhead/overhead_us") + "," +
-		    SafeXmlParse.toDouble(result, "result_details/details_overhead/overhead_clk") + "\n" //"," + 
+		    XmlParse.toDouble(result, "result_netavg/netavg_us") + "," +
+		    XmlParse.toDouble(result, "result_netavg/netavg_clk") + "," +
+		    XmlParse.toDouble(result, "result_details/details_latency/latency_us") + "," +
+		    XmlParse.toDouble(result, "result_details/details_latency/latency_clk") + "," +
+		    XmlParse.toDouble(result, "result_details/details_samples") + "," +
+		    XmlParse.toDouble(result, "result_details/details_overhead/overhead_us") + "," +
+		    XmlParse.toDouble(result, "result_details/details_overhead/overhead_clk") + "\n" //"," + 
 		);
 	    }
 	}
@@ -1217,7 +1252,7 @@ public class CsvWriter
 		    if (!first) outfile.Write(",");
 		    else first = false; 
 		    outfile.Write(getPivotDumpHeader(h, hn));
-		    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='read']"));
+		    histos.Add(XmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='read']"));
 		}
 	    }
 	    outfile.Write("\n");
@@ -1235,7 +1270,7 @@ public class CsvWriter
 		    if (!first) outfile.Write(","); 
 		    else first = false;
 		    outfile.Write(getPivotDumpHeader(h, hn));
-		    histos.Add(SafeXmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='write']"));
+		    histos.Add(XmlParse.selNode(hn.rounds[h].roundNode, "pmbenchmark/report/statistics/histogram[@type='write']"));
 		}
 	    }
 	    outfile.Write("\n");
@@ -1253,11 +1288,11 @@ public class CsvWriter
 		    outfile.Write(meminfos_headers[k + j] + ",");
 		    XmlNode item = sys_mem_items.Item(k);
 		    writeMemInfoWindows(
-			    SafeXmlParse.selNode(item, "mem_item_info"));
+			    XmlParse.selNode(item, "mem_item_info"));
 		    if (!item.Attributes.Item(0).Value.Equals("post-unmap")) {
 			outfile.Write("Delta,");
 			writeMemInfoWindows(
-				SafeXmlParse.selNode(item, "mem_item_delta"));
+				XmlParse.selNode(item, "mem_item_delta"));
 		    }
 		    item = null;
 		}
@@ -1267,11 +1302,11 @@ public class CsvWriter
 		    outfile.Write(meminfos_headers[k + j] + ",");
 		    XmlNode item = sys_mem_items.Item(k);
 		    writeMemInfoLinux(
-			    SafeXmlParse.selNode(item, "mem_item_info"));
+			    XmlParse.selNode(item, "mem_item_info"));
 		    if (!item.Attributes.Item(0).Value.Equals("post-unmap")) {
 			outfile.Write("Delta,");
 			writeMemInfoLinux(
-				SafeXmlParse.selNode(item, "mem_item_delta"));
+				XmlParse.selNode(item, "mem_item_delta"));
 		    }
 		    item = null;
 		}
@@ -1358,7 +1393,7 @@ public static class XmlToSeries
 
 	// graph it (involves retrieving bucket sub hex index)
 	for (int j = 0; j < 16; j++) {
-	    double hex = SafeXmlParse.toDouble(bucket,
+	    double hex = XmlParse.toDouble(bucket,
 		    "bucket_hexes/hex[@index='" + j + "']");
 	    double xval = interval_lo + (0.5 + j) * interval_;
 	    series.Points.AddXY(xvalToSec(xval), hex);
@@ -1367,12 +1402,12 @@ public static class XmlToSeries
 
     private static void writeSumCountOnlyToChart(XmlNode bucket, Series series)
     {
-	double sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
+	double sum_count = XmlParse.toDouble(bucket, "sum_count");
 
 	if (sum_count == 0) return;
 
-	double interval_lo = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_lo");
-	double interval_hi = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_hi");
+	double interval_lo = (double)XmlParse.toInt(bucket, "bucket_interval/interval_lo");
+	double interval_hi = (double)XmlParse.toInt(bucket, "bucket_interval/interval_hi");
 	double interval_ = (interval_hi - interval_lo);
 	double xval = interval_lo + (interval_ / 2);
 	series.Points.AddXY(xvalToSec(xval), sum_count);
@@ -1385,11 +1420,11 @@ public static class XmlToSeries
      */
     private static void writeSumCountOnlyToChart_interpolate(XmlNode bucket, Series series)
     {
-	double sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
+	double sum_count = XmlParse.toDouble(bucket, "sum_count");
 
 	if (sum_count == 0) return;
-	double interval_lo = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_lo");
-	double interval_hi = (double)SafeXmlParse.toInt(bucket, "bucket_interval/interval_hi");
+	double interval_lo = (double)XmlParse.toInt(bucket, "bucket_interval/interval_lo");
+	double interval_hi = (double)XmlParse.toInt(bucket, "bucket_interval/interval_hi");
 	double delta = (interval_hi - interval_lo)/ 16;
 
 	// don't smooth out when we have low sample count
@@ -1409,11 +1444,11 @@ public static class XmlToSeries
     
     private static void getHisto_body(
 	    Series series, 
-	    XmlNode stats, 
+	    XmlNode nodeStat, 
 	    string sname,
 	    bool full)
     {
-	XmlNode histogram = SafeXmlParse.selNode(stats,
+	XmlNode histogram = XmlParse.selNode(nodeStat,
 		"histogram[@type='" + sname + "']");
 
 	if (histogram == null) return; // nothing in there..
@@ -1430,7 +1465,7 @@ public static class XmlToSeries
 	//and deal with the first one (< 2^8 ns)
 	bucket0 = histogram.SelectNodes("histo_bucket[@index='0']");
 	bucket = bucket0.Item(0);
-	sum_count = SafeXmlParse.toDouble(bucket, "sum_count");
+	sum_count = XmlParse.toDouble(bucket, "sum_count");
 
 	series.Points.AddXY(xvalToSec(8), sum_count);
 	series.Points.AddXY(xvalToSec(8), sum_count);
@@ -1438,12 +1473,12 @@ public static class XmlToSeries
 	//intentionally miscalculates x coordinate because 
 	//(2^lo+(j+0.5)*((2^hi-2^lo)/16)) stretches the x axis
 	for (int i = 1; i < 16; i++) {
-	    bucket = SafeXmlParse.selNode(histogram, 
+	    bucket = XmlParse.selNode(histogram, 
 		    "histo_bucket[@index='" + i + "']");
 	    if (full) {
-		interval_lo = (double)SafeXmlParse.toInt(bucket, 
+		interval_lo = (double)XmlParse.toInt(bucket, 
 			"bucket_interval/interval_lo");
-		interval_hi = (double)SafeXmlParse.toInt(bucket,
+		interval_hi = (double)XmlParse.toInt(bucket,
 			"bucket_interval/interval_hi");
 		writeHexBinsToSeries(bucket, interval_lo, interval_hi, 
 			series);
@@ -1473,6 +1508,68 @@ public static class XmlToSeries
 	getHisto_body(serial[1], stats, "write", full);
     }
 
+    // Caller should provide correct histogram node. 
+    // Use full set here
+    public static double[] getRuntime(XmlNode nodeHisto, double[] zones)
+    {
+	var result = new double[zones.Length];	// should be 5
+
+	XmlNodeList bucket0;
+	XmlNode bucket;
+
+	double interval_lo, interval_hi;
+	double sum_count;
+
+	int current_zone = 0;
+	double xval = 8;
+
+	// advance zone
+	while (xvalToSec(xval) > zones[current_zone]) current_zone++;
+
+	bucket0 = nodeHisto.SelectNodes("histo_bucket[@index='0']");
+	bucket = bucket0.Item(0);
+	sum_count = XmlParse.toDouble(bucket, "sum_count");
+	
+	result[current_zone] += sum_count * xvalToSec(xval)/2;
+
+	
+	for (int i = 1; i < 16; i++) {
+	    bucket = XmlParse.selNode(nodeHisto, 
+		    "histo_bucket[@index='" + i + "']");
+	    interval_lo = (double)XmlParse.toInt(bucket, 
+		    "bucket_interval/interval_lo");
+	    interval_hi = (double)XmlParse.toInt(bucket,
+		    "bucket_interval/interval_hi");
+	    double sixteenth = (interval_hi - interval_lo) / 16;
+
+	    for (int j = 0; j < 16; j++) {
+		double count = XmlParse.toDouble(bucket,
+			"bucket_hexes/hex[@index='" + j + "']");
+		xval = interval_lo + (0.5 + j) * sixteenth;
+		while (xvalToSec(xval) > zones[current_zone]) current_zone++;
+		result[current_zone] += xvalToSec(xval) * count;
+	    }
+	}
+	
+	//deal with the rest of the index 0 histo buckets
+	for (int i = 1; i < bucket0.Count; i++) {
+	    bucket = bucket0.Item(i);
+
+	    sum_count = XmlParse.toDouble(bucket, "sum_count");
+
+	    interval_lo = (double)XmlParse.toInt(bucket, "bucket_interval/interval_lo");
+	    interval_hi = (double)XmlParse.toInt(bucket, "bucket_interval/interval_hi");
+	    double midpoint = (interval_hi - interval_lo);
+
+	    xval = interval_lo + (midpoint / 2);
+
+	    while (xvalToSec(xval) > zones[current_zone]) current_zone++;
+	    result[current_zone] += xvalToSec(xval) * sum_count;
+	}
+
+	return result;
+    }
+
 }   // XmlToSeries
 
 
@@ -1497,10 +1594,10 @@ public class PlotPoints
 	full[0] = new Series(); // read
 	full[1] = new Series(); // write
 
-	stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
+	stats = XmlParse.selNode(node, "pmbenchmark/report/statistics");
 	XmlToSeries.getHisto(mini, stats, false); // read and write
 
-	stats = SafeXmlParse.selNode(node, "pmbenchmark/report/statistics");
+	stats = XmlParse.selNode(node, "pmbenchmark/report/statistics");
 	XmlToSeries.getHisto(full, stats, true);
     }
 
@@ -1647,8 +1744,6 @@ public class PivotChart
 	    s.Points.Clear();
 	    s.Points.AddXY(0.1, 100); 
 	    s.Points.AddXY(0.01, 10); 
-	    s.Points.AddXY(0.001, 100); 
-	    s.Points.AddXY(0.00001, 10); 
 	    return s;
 	}
 
@@ -1675,6 +1770,7 @@ public class PivotChart
 	{
 	    if (s == null) return;
 
+	    // the following line is important for CPU usage
 	    if (ReferenceEquals(lastDrawn, s)) return;
 
 	    setColor(s.Color);
@@ -1842,7 +1938,7 @@ public class PivotChart
 
 	    Legend legend = new Legend();
 	    legend.Name = "Legend";
-	    legend.TextWrapThreshold = 60;
+	    legend.TextWrapThreshold = 80;
 	    legend.DockedToChartArea = "histogram";
 
 	    chart.ChartAreas.Add(chartarea);
@@ -2123,44 +2219,44 @@ Console.WriteLine("createHoverSeries(): already exists");
     private Binder addSeriesBody(BenchRound br, Access type)
     {
 	Series series;
-	Binder bs;
+	Binder binder;
 	Color color;
 
-	bs = new Binder();
-	bs.theBenchRound = br;
+	binder = new Binder();
+	binder.theBenchRound = br;
 	color = getColor(734, type);
 
 	// add mini series
 	series = produceSeries(br, DetailLevel.mini, type);
-	bs.miniSeries = series;
+	binder.miniSeries = series;
 	miniChart.Series.Add(series);
 
 	// add full series
 	series = produceSeries(br, DetailLevel.full, type);
-	bs.fullSeries = series;
+	binder.fullSeries = series;
 	fullChart.Series.Add(series);
 
 	// add log series
 	series = produceSeries(br, DetailLevel.full, type);
 	massageDataPoints(series); // zero to 1 for log drawing
-	bs.logSeries = series;
+	binder.logSeries = series;
 	logChart.Series.Add(series);
 
-	bs.seriesName = series.Name;
-	bs.myAccessType = type;
-	bs.activeColor = color;
-	bs.setColor(bs.activeColor);
+	binder.seriesName = series.Name;
+	binder.myAccessType = type;
+	binder.activeColor = color;
+	binder.setColor(binder.activeColor);
 	
-	allSeries[series.Name] = bs;
-	return bs;
+	allSeries[series.Name] = binder;
+	return binder;
     }
 
     public void addSeries(BenchRound br)
     {
-	Binder bs;
+	Binder binder;
 
 	if (br.ratio() > 0) {	// read data exist
-	    bs = addSeriesBody(br, Access.read);
+	    binder = addSeriesBody(br, Access.read);
 	    
 	    // populating partnerSeries information
 	    if (br.ratio() >= 100) {
@@ -2168,12 +2264,12 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    } else {
 		// XXX below hack relies on how we name series..
 		string pname = br.customName + " (write)";
-		partnerSeries.Add(pname, bs);
+		partnerSeries.Add(pname, binder);
 	    }
 	}
 
 	if (br.ratio() < 100) {  // write data exist
-	    bs = addSeriesBody(br, Access.write);
+	    binder = addSeriesBody(br, Access.write);
 
 	    // populating partnerSeries information
 	    if (br.ratio() <= 0) {
@@ -2181,7 +2277,7 @@ Console.WriteLine("createHoverSeries(): already exists");
 	    } else {
 		// XXX below hack relies on how we name series..
 		string pname = br.customName + " (read)";
-		partnerSeries.Add(pname, bs);
+		partnerSeries.Add(pname, binder);
 	    }
 	}
     }
@@ -2203,7 +2299,97 @@ Console.WriteLine("createHoverSeries(): already exists");
 	logChart.Series.Add(s);
     }
 
+    public BenchRuntimeStat getRuntimeStatsSelected(double[] threshold)
+    {
+	var rts = new BenchRuntimeStat();
+
+	// we do selected series first.
+	// go through the list and process selected series.
+	rts.stats = new List<BenchRuntimeItem>();
+
+	int i = 0;
+	foreach (var item in allSeries) {
+	    if (!item.Value.selected) continue;
+	    var stat = new BenchRuntimeItem();
+
+	    stat.bname = item.Value.seriesName; 
+	    // the callee allocates array
+	    stat.timespent = item.Value.theBenchRound.calculateTimeSpent(
+		    threshold, item.Value.myAccessType);
+
+	    rts.stats.Add(stat);
+	    i++;
+	}
+	if (i != selectionCount) {
+	    MB.S("selection count mismatch.");
+	}
+
+	// Build aggregate from stats using partner series info.
+	rts.agg_stats = new List<BenchRuntimeItem>();
+	// N.B., HashSet collection compares strings by value.
+	var statAdded = new HashSet<string>();
+	var iter = rts.stats.GetEnumerator();
+	while (iter.MoveNext()) {
+	    var stat = iter.Current;
+	    if (statAdded.Contains(stat.bname)) continue;
+	    var binder = allSeries[stat.bname];
+	    var agg = new BenchRuntimeItem();
+	   
+	    // need to use original name without (read)/(write) suffix
+	    agg.bname = binder.theBenchRound.customName;
+	    agg.timespent = (double[]) stat.timespent.Clone();
+
+	    statAdded.Add(stat.bname);
+	    
+	    // now check for partner series
+	    Binder partner;
+	    if (partnerSeries.TryGetValue(stat.bname, out partner)) {
+		//found. we expect it to be the next item in rts.stats
+		if (iter.MoveNext()) { // next item exists
+		    var partner_stat = iter.Current;
+		    // check if it is indeed the same by comparing names
+		    if (partner_stat.bname != partner.seriesName) {
+			MB.S("getRuntimeStatsSelected: name mismatch");
+		    }
+		    for (int j = 0; j < 5; j++) {
+			agg.timespent[j] += partner_stat.timespent[j];
+		    }
+		    statAdded.Add(partner_stat.bname);
+		} else {
+		    rts.agg_stats.Add(agg);
+		    break;  // out of while loop
+		}
+	    } else {
+		//not found. probably read-only or write-only benchmark
+		// nothing to do;
+		;
+	    }
+	    rts.agg_stats.Add(agg);
+	}
+	return rts;
+    }
+
 }   // PivotChart
+
+
+///////////
+// used to transfer collected data to GUI
+public class BenchRuntimeItem
+{
+    public string bname; // name of benchmark run
+    public double[] timespent;  // sum of latency * count over ranges
+
+    public BenchRuntimeItem() { ; }
+}
+
+public class BenchRuntimeStat
+{
+    public List<BenchRuntimeItem> stats; // for individual bench
+    public List<BenchRuntimeItem> agg_stats; // partner series aggregated 
+
+    public BenchRuntimeStat() { ; }
+}
+
 
 
 ///////////
@@ -2218,9 +2404,8 @@ public class Harness
     public List<BenchRound> rounds;
     public PivotChart thePivotChart; // turn back to private after debug
     public PmGraph pmgraph;
-    public bool dumped = false;
 
-    // this constructor is for embedded 'manual'
+    // this constructor is for embedded 'harness'
     public Harness(PmGraph pmg)
     {
 	thePivotChart = null;
@@ -2289,18 +2474,18 @@ public class Harness
 	    iter.Value = (flagcount++ + 1).ToString();
 	    fakeRound.Attributes.Append(iter);
 
-	    if (SafeXmlParse.selNode(tempdoc, 
+	    if (XmlParse.selNode(tempdoc, 
 			"test_nice/test_round/pmbenchmark") == null) {
 		MB.S("pmbenchmark node not found; root element is " 
 			+ tempdoc.DocumentElement.Name);
 	    }
 	    fakeRound.AppendChild(doc.ImportNode(
-			SafeXmlParse.selNode(tempdoc, 
+			XmlParse.selNode(tempdoc, 
 			    "test_nice/test_round/pmbenchmark"), true));
 	    fakeSeries.AppendChild(fakeRound);
 
 	    ps.setParamsFromNode(PmGraph.getParamsNodeFromSeriesNode(fakeSeries));
-	    ps.operatingSystem = SafeXmlParse.selNode(tempdoc, 
+	    ps.operatingSystem = XmlParse.selNode(tempdoc, 
 		    "test_nice/test_round/pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
 	}
 
@@ -2459,6 +2644,18 @@ Console.WriteLine("addNewBenchrounds: wasDeletedDontBother");
     {
 	return thePivotChart.getSelectionCount();
     }
+
+    // statistic retrieval. aware of currently selected items
+    public BenchRuntimeStat getRuntimeStats(double[] threshold)
+    {
+	// provide default..
+	if (threshold == null) {
+	    threshold = new double[5] { 0.5e-6, 3e-6, 50e-6, 500e-6, 100 }; 
+	}
+	
+	return thePivotChart.getRuntimeStatsSelected(threshold);
+    }
+
 
 }   // Harness
 

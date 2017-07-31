@@ -38,25 +38,46 @@ namespace PmGraphNS
 {
 
 ////////////////////////////////////////////////////////
+// trivial class overrides..
+public class PmButton : Button
+{
+    public PmButton(string text, EventHandler e, bool enable)
+    {
+	Text = text;
+	Click += new EventHandler(e);
+	Enabled = enable;
+    }
+
+    // override default size rather than setting size..
+    // N.B., Winform default button size: (75,23)
+    protected override Size DefaultSize
+    {
+	get { return new Size(82,23); }
+    }
+}
+
+////////////////////////////////////////////////////////
 // control panel
 // see PmPurged.cs for old junks
 public class ControlPanel : FlowLayoutPanel
 {
-    public Button averageSelectedButton, deleteSelectedButton;
-    public Button selectAllButton, helpButton;
+    public PmButton averageSelectedButton, deleteSelectedButton;
+    public PmButton selectAllButton, helpButton;
 
-    private Button screenshotButton;
-    private Button aboutButton;
-    private Button debugDumpInternalButton;
-    private Button debugRebuildChartButton;
+    private PmButton screenshotButton;
+    private PmButton aboutButton;
+    private PmButton debugDumpInternalButton;
+    private PmButton debugRebuildChartButton;
+
+    private PmButton barGraphButton;
 
     private RadioButton[] selectChart;
     private Panel chartSelectPanel;
 
     private PmGraph pmgraph;
 
-    private Button exportManualButton;
-    private Button importManualSingleButton;
+    private PmButton exportManualButton;
+    private PmButton importManualSingleButton;
 
     private static int debugenable_state = 0;
 
@@ -81,14 +102,6 @@ public class ControlPanel : FlowLayoutPanel
 
 	debugenable_state = 0;
     }
-    
-    private void about_click(object sender, EventArgs e)
-    {
-	easteregg(2);
-	MessageBox.Show("pmgraph v0.8\n\n" +
-		"Copyright (c) 2017 - All rights reserved\n" +
-		"Pmbench project - http://bitbucket.org/jisooy/pmbench");
-    }
 
     private void helpButton_click(object sender, EventArgs e)
     {
@@ -105,26 +118,34 @@ public class ControlPanel : FlowLayoutPanel
 	);
     }
 
+    private void about_click(object sender, EventArgs e)
+    {
+	easteregg(2);
+	MessageBox.Show("pmgraph v0.8\n\n" +
+		"Copyright (c) 2017 - All rights reserved\n" +
+		"Pmbench project - http://bitbucket.org/jisooy/pmbench");
+    }
+
     public ControlPanel(PmGraph p)
     {
 	pmgraph = p;
 
-	Width = 78;
+	Width = 84;
 	Height = pmgraph.Height - SystemInformation.CaptionHeight;
 
 	FlowDirection = FlowDirection.TopDown;
 
-	importManualSingleButton = initButton("Import XML", 
+	importManualSingleButton = new PmButton("Import XML", 
 		importSingleBenches_click, true);
-	exportManualButton = initButton("Export CSV", 
+	exportManualButton = new PmButton("Export CSV", 
 		pmgraph.exportCsvManual_click, false);
-	averageSelectedButton = initButton("Average selected",
+	averageSelectedButton = new PmButton("Average selected",
 		pmgraph.averageSelectedButton_click, false);
-	deleteSelectedButton = initButton("Delete seleted",
+	deleteSelectedButton = new PmButton("Delete seleted",
 		pmgraph.deleteSelectedButton_click, false);
-	selectAllButton = initButton("Select all", 
+	selectAllButton = new PmButton("Select all", 
 		pmgraph.selectAll_click, false);
-	helpButton = initButton("Instructions", 
+	helpButton = new PmButton("Instructions", 
 		helpButton_click, true);
 
 	Controls.Add(importManualSingleButton);
@@ -137,7 +158,7 @@ public class ControlPanel : FlowLayoutPanel
 	// chart selection radio button 
 	chartSelectPanel = new Panel();
 	chartSelectPanel.BorderStyle = BorderStyle.Fixed3D;
-	chartSelectPanel.Size = new Size(78, 80);
+	chartSelectPanel.Size = new Size(84, 80);
 
 	String[] chtnames = { "mini", "full", "log" };
 	String[] chttexts = { "Mini (linear)", "Full (linear)", "Full (Log)" };
@@ -156,38 +177,26 @@ public class ControlPanel : FlowLayoutPanel
 	chartSelectPanel.Controls.AddRange(selectChart);
 	Controls.Add(chartSelectPanel);
 
-	screenshotButton = initButton("Screenshot", 
+	barGraphButton = new PmButton("Bar Graph", bargraph_click, false);
+	Controls.Add(barGraphButton);
+
+	screenshotButton = new PmButton("Screenshot", 
 		pmgraph.screenshot_click, true);
 	Controls.Add(screenshotButton);
 
-	aboutButton = initButton("About", 
-		about_click, true);
+	aboutButton = new PmButton("About", about_click, true);
 	Controls.Add(aboutButton);
 
-	debugDumpInternalButton = initButton("debug dump", 
+	debugDumpInternalButton = new PmButton("debug dump", 
 		pmgraph.testError_click, true);
-	debugRebuildChartButton = initButton("redraw chart", 
-		pmgraph.rebuildChart_click, true);
+	debugRebuildChartButton = new PmButton("redraw chart", 
+		rebuildChart_click, true);
 
 	selectAllButton.Enabled = true;
 	exportManualButton.Enabled = false;
     }
 
-    public void selectChartRadioFull()
-    {
-	selectChart[1].Checked = true;
-    }
-
-    private static Button initButton(string text, EventHandler e, bool enable)
-    {
-	Button b = new Button();
-	b.Text = text;
-	b.Click += new EventHandler(e);
-	b.Enabled = enable;
-	return b;
-    }
-
-    public void importSingleBenches_click(object sender, EventArgs args)
+    private void importSingleBenches_click(object sender, EventArgs args)
     {
 	int before = 0;
 
@@ -208,25 +217,405 @@ public class ControlPanel : FlowLayoutPanel
 	setManualButtonsEnabled(before);
     }
 
+    private void bargraph_click(object sender, EventArgs args)
+    {
+	if (pmgraph.launchBarWindow()) {
+	    barGraphButton.Enabled = false;
+	}
+    }
+
+    private void rebuildChart_click(object sender, EventArgs e)
+    {
+	pmgraph.redrawChart();
+	selectChart[1].Checked = true;
+    }
+
     public void setManualButtonsEnabled(int i)
     {
 	exportManualButton.Enabled = (i > 0);
 	deleteSelectedButton.Enabled = (i > 0);
 	averageSelectedButton.Enabled = (i > 2);
+	barGraphButton.Enabled = (i > 0) && !pmgraph.isBarWindowActive();
     }
+
+    public void setBarGraphButtonEnabled()
+    {
+	barGraphButton.Enabled = true;
+    }
+
 }   // ControlPanel
 
 
+
 ////////////////////////////////////////////////////////
-// PmGraph partial class that matters
-// see PmPurged.cs for old junks
-public partial class PmGraph : System.Windows.Forms.Form
+// PmBar class 
+// draws bar chart comparing benchmarks 
+public class PmBar : System.Windows.Forms.Form
 {
-    private Panel mainPanel;
+    private PmButton screenshotButton;
+    private PmButton reloadButton;
+    private CheckBox aggregateRWBox;
+    private CheckBox scaleTo100Box;
+    private PmButton thresholdButton;
+
+    private FlowLayoutPanel leftPanel;
+
+    private Chart chartSplit, chartAggre;
+
+    private Harness harness;
+
+    private double[] threshold = new double [5] {
+	    0.5e-6,	    // < 0.5us   hits
+	    3e-6,	    // <   3us   soft fault 
+	    50e-6,	    // <  50us   hard fault, fast path
+	    500e-6,	    // < 0.5ms   hard fault, slow path
+	    100,	    // >=0.5ms   hard fault, high latency (sched?)
+	};
+
+    private void createLeftPanel()
+    {
+	leftPanel = new FlowLayoutPanel();
+	leftPanel.Location = new Point(0, 0);
+	leftPanel.Width = 84;
+	leftPanel.Height = this.Height - SystemInformation.CaptionHeight;
+
+	reloadButton = new PmButton("Reload", reload_click, true);
+	leftPanel.Controls.Add(reloadButton);
+	thresholdButton = new PmButton("Set threshold", threshold_click, true);
+	leftPanel.Controls.Add(thresholdButton);
+
+	aggregateRWBox = new CheckBox() {
+	    Text = "Combine RW",
+	    Enabled = true,
+	    Checked = true };
+	aggregateRWBox.CheckedChanged += new EventHandler(aggregate_click);
+	leftPanel.Controls.Add(aggregateRWBox);
+
+	scaleTo100Box = new CheckBox() {
+	    Text = "Scale to 100",
+	    Enabled = true,
+	    Checked = false };
+	scaleTo100Box.CheckedChanged += new EventHandler(scaleTo100_click);
+	leftPanel.Controls.Add(scaleTo100Box);
+
+	screenshotButton = new PmButton("Screenshot", screenshot_click, true);
+	leftPanel.Controls.Add(screenshotButton);
+
+	this.Controls.Add(leftPanel);
+    }
+
+    private Chart createNewChart(string name)
+    {
+	Chart chart = new Chart();
+	ChartArea ca = new ChartArea();
+	Legend legend = new Legend();
+
+	ca.Name = name;
+	ca.AxisX.Title = "Benchmarks";
+	ca.AxisX.ScaleView.Zoomable = true;
+	ca.AxisX.MajorTickMark.Enabled = true;
+	ca.AxisY.Title = "Time Spent";
+	ca.AxisY.ScaleView.Zoomable = true;
+
+	legend.Name = "Average";
+	legend.TextWrapThreshold = 80;
+	legend.DockedToChartArea = name;
+
+	chart.ChartAreas.Add(ca);
+	chart.Name = "Runtime bar";
+	chart.Legends.Add(legend);
+	chart.TabIndex = 1;
+	chart.Text = "Runtime breakdown bar chart";
+
+	chart.Location = new Point(
+		leftPanel.Width 
+		+ leftPanel.Margin.Left 
+		+ leftPanel.Margin.Right
+		, 0);
+	return chart;
+    }
+
+
+    private void createCharts()
+    {
+	chartSplit = createNewChart("barchart");
+
+	chartAggre = createNewChart("barchart r/w combined");
+	if (aggregateRWBox.Checked) {
+	    this.Controls.Remove(chartSplit);
+	    this.Controls.Add(chartAggre);
+	} else {
+	    this.Controls.Add(chartSplit);
+	    this.Controls.Remove(chartAggre);
+	}
+
+	// below sets size
+	resize_event(null, null);
+    }
+
+    private void createDataSeries()
+    {
+	string[] sname = {"hit", "soft", "hard low", "hard mid", "hard high"};
+
+	SeriesChartType ctype;
+	ctype = scaleTo100Box.Checked ? SeriesChartType.StackedColumn100
+				    : SeriesChartType.StackedColumn;
+	Series s;
+	for (int i = 0; i < 5; i++) {
+	    s = new Series(sname[i]);
+	    s.ChartType = ctype;
+	    chartSplit.Series.Add(s);
+
+	    s = new Series(sname[i]);
+	    s.ChartType = ctype;
+	    chartAggre.Series.Add(s);
+	}
+    }
+
+    public PmBar(Harness hn)
+    {
+	SuspendLayout();
+	harness = hn;
+
+	this.Text = "PmGraph - Pmbench XML result comparison";
+	this.Size = new Size(480, 380);
+
+	createLeftPanel();
+	createCharts();
+
+	createDataSeries();
+
+	Resize += new EventHandler(this.resize_event);
+
+	importDataSeries();
+
+	ResumeLayout();
+    }
+
+    private void deleteDataSeries()
+    {
+	foreach (var series in chartSplit.Series) {
+	    series.Dispose();
+	}
+	foreach (var series in chartAggre.Series) {
+	    series.Dispose();
+	}
+	chartSplit.Series.Clear();
+	chartAggre.Series.Clear();
+    }
+
+    private void importDataSeries()
+    {
+	BenchRuntimeStat rts = harness.getRuntimeStats(threshold);
+
+	foreach (var stat in rts.stats) {
+	    for (int j = 0; j < rts.stats[0].timespent.Length; j++) {
+		int k = chartSplit.Series[j].Points.AddY(stat.timespent[j]);
+		//XXX: slow indexing on list
+		chartSplit.Series[j].Points[k].AxisLabel = stat.bname;
+	    }
+	}
+
+	foreach (var stat in rts.agg_stats) {
+	    for (int j = 0; j < rts.agg_stats[0].timespent.Length; j++) {
+		int k = chartAggre.Series[j].Points.AddY(stat.timespent[j]);
+		//XXX: slow indexing on list
+		chartAggre.Series[j].Points[k].AxisLabel = stat.bname;
+	    }
+	}
+    }
+
+    private void resize_event(object sender, EventArgs args)
+    {
+	leftPanel.Height = this.Height - SystemInformation.CaptionHeight;
+
+	chartSplit.Width = this.Width 
+		    - leftPanel.Width
+		    - leftPanel.Margin.Left
+		    - leftPanel.Margin.Right - 5;
+	chartSplit.Height = leftPanel.Height - 5;
+	chartAggre.Width = this.Width 
+		    - leftPanel.Width
+		    - leftPanel.Margin.Left
+		    - leftPanel.Margin.Right - 5;
+	chartAggre.Height = leftPanel.Height - 5;
+    }
+
+    public void reload_click(object sender, EventArgs args)
+    {
+	SuspendLayout();
+
+	deleteDataSeries();
+	createDataSeries();
+	importDataSeries();
+
+	ResumeLayout();
+    }
+
+    private void screenshot_click(object sender, EventArgs args)
+    {
+	Chart current = aggregateRWBox.Checked ? chartAggre : chartSplit;
+
+	using (MemoryStream ms = new MemoryStream()) {
+	    current.SaveImage(ms, ChartImageFormat.Bmp);
+	    Clipboard.SetImage(new Bitmap(ms));
+	}
+	MessageBox.Show("Chart image saved to Clipboard");
+    }
+
+    private void aggregate_click(object sender, EventArgs args)
+    {
+	CheckBox c = sender as CheckBox;
+
+	SuspendLayout();
+	if (c.Checked) {
+	    this.Controls.Remove(chartSplit);
+	    this.Controls.Add(chartAggre);
+	} else {
+	    this.Controls.Add(chartSplit);
+	    this.Controls.Remove(chartAggre);
+	}
+	ResumeLayout();
+    }
+
+    private void scaleTo100_click(object sender, EventArgs args)
+    {
+	CheckBox c = sender as CheckBox;
+
+	SeriesChartType ctype = c.Checked ? SeriesChartType.StackedColumn100
+				    : SeriesChartType.StackedColumn;
+
+	SuspendLayout();
+	foreach (var series in chartSplit.Series) {
+	    series.ChartType = ctype;
+	}
+	foreach (var series in chartAggre.Series) {
+	    series.ChartType = ctype;
+	}
+	ResumeLayout();
+    }
+
+    public void threshold_click(object sender, EventArgs args)
+    {
+	Form myForm = new Form();
+	myForm.SuspendLayout();
+	myForm.FormBorderStyle = FormBorderStyle.FixedDialog;
+
+	myForm.Size = new Size(260,210);
+	var flowPanel = new FlowLayoutPanel();
+
+	Button okay = new Button() {
+	    Text = "OK",
+	    DialogResult = DialogResult.OK,
+	    Location = new Point(40, 145) };
+	Button cancel = new Button() {
+	    Text = "Cancel",
+	    DialogResult = DialogResult.Cancel,
+	    Location = new Point(140, 145) };
+	
+	Label hitLabel = new Label() {
+	    Text = "Hits are less than :",
+	    TextAlign = ContentAlignment.MiddleLeft };
+	Label softLabel = new Label() {
+	    Text = "Soft faluts are < :",
+	    TextAlign = ContentAlignment.MiddleLeft };
+	Label hard_lowLabel = new Label() {
+	    Text = "Hard (low) are < :",
+	    TextAlign = ContentAlignment.MiddleLeft };
+	Label hard_midLabel = new Label() {
+	    Text = "Hard (mid) are < :",
+	    TextAlign = ContentAlignment.MiddleLeft };
+	
+	TextBox hitBox = new TextBox() {
+	    Text = (threshold[0] * 1e6).ToString(),
+	    Multiline = false };
+	TextBox softBox = new TextBox() {
+	    Text = (threshold[1] * 1e6).ToString(),
+	    Multiline = false };
+	TextBox hard_lowBox = new TextBox() {
+	    Text = (threshold[2] * 1e6).ToString(),
+	    Multiline = false };
+	TextBox hard_midBox = new TextBox() {
+	    Text = (threshold[3] * 1e6).ToString(),
+	    Multiline = false };
+	
+	Label us0 = new Label() { Text = "us" };
+	Label us1 = new Label() { Text = "us" };
+	Label us2 = new Label() { Text = "us" };
+	Label us3 = new Label() { Text = "us" };
+	us0.TextAlign = ContentAlignment.MiddleLeft;
+	us1.TextAlign = ContentAlignment.MiddleLeft;
+	us2.TextAlign = ContentAlignment.MiddleLeft;
+	us3.TextAlign = ContentAlignment.MiddleLeft;
+
+	flowPanel.SuspendLayout();
+	flowPanel.FlowDirection = FlowDirection.LeftToRight;
+	flowPanel.Controls.AddRange(new Control[] { 
+		hitLabel, hitBox, us0,
+		softLabel, softBox, us1,
+		hard_lowLabel, hard_lowBox, us2,
+		hard_midLabel, hard_midBox, us3
+		} );
+	flowPanel.Size = new Size(320, 105);
+	flowPanel.Location = new Point(10, 5);
+	flowPanel.ResumeLayout();
+	myForm.Controls.Add(flowPanel);
+
+	myForm.Controls.Add(okay);
+	myForm.Controls.Add(cancel);
+	
+	Label infoLabel = new Label() { 
+	    Text = "* Reload graph to use new threshold setting. *",
+	    Location = new Point(10,120),
+	    Size = new Size(300, 20) };
+
+	myForm.Controls.Add(infoLabel);
+	
+	myForm.ResumeLayout();
+	myForm.ShowDialog();
+
+	if (myForm.DialogResult == DialogResult.OK) {
+	    double[] temp = new double[5];
+	    try {
+		temp[0] = Convert.ToDouble(hitBox.Text) * 1e-6;
+		temp[1] = Convert.ToDouble(softBox.Text) * 1e-6;
+		temp[2] = Convert.ToDouble(hard_lowBox.Text) * 1e-6;
+		temp[3] = Convert.ToDouble(hard_midBox.Text) * 1e-6;
+		temp[4] = 100;
+	    }
+	    catch (FormatException) {
+		MessageBox.Show("Illegal entry - numeric value only.");
+		goto error_out;
+	    }
+	    catch (OverflowException) {
+		MessageBox.Show("Illegal entry - value out of range.");
+		goto error_out;
+	    }
+	    
+	    for (int i = 0; i < 3; i++) {
+		if (temp[i] > temp[i+1]) {
+		    MessageBox.Show("Numbers must be in an asending order.");
+		    goto error_out;
+		}
+	    }
+	    Array.Copy(temp, threshold, 5);
+	}
+
+error_out:
+	myForm.Dispose();
+    }
+}
+
+////////////////////////////////////////////////////////
+// PmGraph class that matters
+// see PmPurged.cs for old junks
+public class PmGraph : System.Windows.Forms.Form
+{
     private ControlPanel controlPanel;
+    private PmBar barWindow;
 
     private Chart currentChart;	// hold onto the current Chart object
-    public Harness manual;
+    private Harness harness;
 
     private Dictionary<string, XmlDocument> xmlFiles;
 
@@ -244,23 +633,17 @@ public partial class PmGraph : System.Windows.Forms.Form
 
 	this.Size = new Size(780, 580);
 
-	mainPanel = new Panel();
-	mainPanel.Location = new Point(0, 0);
-	mainPanel.Width = this.Width;
-	mainPanel.Height = this.Height - SystemInformation.CaptionHeight;
 
 	controlPanel = new ControlPanel(this);
 
-	mainPanel.Controls.Add(controlPanel);
-
-	Controls.Add(mainPanel);
+	Controls.Add(controlPanel);
 
 	xmlFiles = new Dictionary<string, XmlDocument>();
 
-	manual = new Harness(this);
+	harness = new Harness(this);
 
 	// initialize pivotchart
-	Chart newchart = manual.rebuildAndGetNewChart(
+	Chart newchart = harness.rebuildAndGetNewChart(
 		calculateChartWidth(), calculateChartHeight());
 
 	if (newchart == null) {
@@ -270,7 +653,14 @@ public partial class PmGraph : System.Windows.Forms.Form
 
 	attachChart(newchart);
 
-	Resize += new EventHandler(resize_event);
+	this.Resize += (sender, arg) =>
+	    {
+		if (Controls.Contains(currentChart)) {
+		    currentChart.Width = calculateChartWidth();
+		    currentChart.Height = calculateChartHeight();
+		    //currentChart.Refresh();
+		}
+	    };
 
 	ResumeLayout();
     }
@@ -280,41 +670,32 @@ public partial class PmGraph : System.Windows.Forms.Form
 	Console.WriteLine("PmGraph::dumpXmlFiles (count = {0})",
 		xmlFiles.Count);
 	foreach(string key in xmlFiles.Keys) {
-	    Console.WriteLine(key);
+	    Console.WriteLine("  " + key);
 	}
     }
 
     private int calculateChartWidth()
     {
-	return mainPanel.Width 
+	return this.Width 
 		- controlPanel.Width 
 		- controlPanel.Margin.Left 
-		- controlPanel.Margin.Right;
+		- controlPanel.Margin.Right
+		- SystemInformation.FrameBorderSize.Width * 2
+		;
     }
 
     private int calculateChartHeight()
     {
-	return mainPanel.Height;
-    }
-
-    private void resize_event(object sender, EventArgs args)
-    {
-	mainPanel.Width = this.Width; 
-	mainPanel.Height = this.Height - SystemInformation.CaptionHeight;
-
-	if (mainPanel.Controls.Contains(currentChart)) {
-	    currentChart.Width = calculateChartWidth();
-	    currentChart.Height = calculateChartHeight();
-
-	    // don't need to call Refresh()
-	    //currentChart.Refresh();
-	}
+	return this.Height 
+		- SystemInformation.CaptionHeight 
+		- SystemInformation.FrameBorderSize.Height * 2
+		;
     }
 
     private void detachChart()
     {
-	if (mainPanel.Controls.Contains(currentChart)) {
-	    mainPanel.Controls.Remove(currentChart);
+	if (Controls.Contains(currentChart)) {
+	    Controls.Remove(currentChart);
 	    currentChart = null;
 	}
     }
@@ -326,24 +707,24 @@ public partial class PmGraph : System.Windows.Forms.Form
 		+ controlPanel.Margin.Left 
 		+ controlPanel.Margin.Right
 		, 0);
-	mainPanel.Controls.Add(newchart);
+	Controls.Add(newchart);
 	currentChart = newchart;
     }
 
     /*
      * Hard redraw of chart- basically remove/recreate/reattach chart..
      */
-    private void redrawManual()
+    public void redrawChart()
     {
 	detachChart();
 
-	manual.destroyPivotChart();
+	harness.destroyPivotChart();
 
-	Chart newchart = manual.rebuildAndGetNewChart(
+	Chart newchart = harness.rebuildAndGetNewChart(
 		calculateChartWidth(),
 		calculateChartHeight());
 
-	if (newchart == null) MB.S("redrawManual: null chart returned");
+	if (newchart == null) MB.S("redrawChart: null chart returned");
 
 	attachChart(newchart);
     }
@@ -356,7 +737,7 @@ public partial class PmGraph : System.Windows.Forms.Form
 
 	detachChart();
 
-	Chart chart = manual.switchToChart(b.Name);
+	Chart chart = harness.switchToChart(b.Name);
 
 	chart.Width = calculateChartWidth();
 	chart.Height = calculateChartHeight();
@@ -366,7 +747,7 @@ public partial class PmGraph : System.Windows.Forms.Form
 
     public static XmlNode getParamsNodeFromSeriesNode(XmlNode node)
     {
-	return SafeXmlParse.selNode(node,
+	return XmlParse.selNode(node,
 		"test_round/pmbenchmark/report/signature/params");
     }
 
@@ -423,11 +804,11 @@ public partial class PmGraph : System.Windows.Forms.Form
 	    fakeRound.Attributes.Append(iter);
 
 	    fakeRound.AppendChild(doc.ImportNode(
-			SafeXmlParse.selNode(tempdoc, "pmbenchmark"), true));
+			XmlParse.selNode(tempdoc, "pmbenchmark"), true));
 	    fakeSeries.AppendChild(fakeRound);
 
 	    ps.setParamsFromNode(getParamsNodeFromSeriesNode(fakeSeries));
-	    ps.operatingSystem = SafeXmlParse.selNode(tempdoc, 
+	    ps.operatingSystem = XmlParse.selNode(tempdoc, 
 		    "pmbenchmark/report/signature/pmbench_info/version_options").InnerText;
 
 	    BenchSiblings bench = new BenchSiblings(fakeSeries, doc, ps);
@@ -435,43 +816,43 @@ public partial class PmGraph : System.Windows.Forms.Form
 	    bench.averageRound.customName = registerXmlDocName(fname, doc);
 
 	    //XXX fix this! moved from addSeriesAverageToManual()
-	    if (manual.baseParams == null) {
-		manual.baseParams = bench.benchParams;
+	    if (harness.baseParams == null) {
+		harness.baseParams = bench.benchParams;
 	    }
 	    brs.Add(bench.averageRound);
 	}
 
-	manual.addNewBenchrounds(brs);
+	harness.addNewBenchrounds(brs);
     }
 
     public void exportCsvManual_click(object sender, EventArgs e)
     {
-	manual.exportCsv(null);
+	harness.exportCsv(null);
     }
 
     private int averageCounter = 0;
     public void averageSelectedButton_click(object sender, EventArgs e)
     {
-	BenchSiblings bench = manual.averageSelected(averageCounter++);
+	BenchSiblings bench = harness.averageSelected(averageCounter++);
 
 	registerXmlDocName(bench.averageRound.customName, bench.theDoc);
 
 	// XXX below 'if' can go??
-	if (manual.baseParams == null) manual.baseParams = bench.benchParams;
+	if (harness.baseParams == null) harness.baseParams = bench.benchParams;
 
 	var brs = new List<BenchRound>();
 	brs.Add(bench.averageRound);
-	manual.addNewBenchrounds(brs);
+	harness.addNewBenchrounds(brs);
     }
 
     public void deleteSelectedButton_click(object sender, EventArgs e)
     {
-	manual.deleteSelected();
+	harness.deleteSelected();
     }
 
     public void selectAll_click(object sender, EventArgs e)
     {
-	manual.selectAll();
+	harness.selectAll();
     }
 
     public void screenshot_click(object sender, EventArgs e)
@@ -493,22 +874,35 @@ public partial class PmGraph : System.Windows.Forms.Form
 
     public void testError_click(object sender, EventArgs e)
     {
-	//testerror_dumpXmlFilesToConsole();
 	try {
-	    manual.thePivotChart.testerror_dumpChartSeries();
-	    manual.thePivotChart.testerror_dumpSelectionStatus();
+	    testerror_dumpXmlFilesToConsole();
+	    harness.thePivotChart.testerror_dumpChartSeries();
+	    harness.thePivotChart.testerror_dumpSelectionStatus();
 	} catch (NullReferenceException) {
-	    Console.WriteLine("Null reference manual.thePivotChart.testerror_dumpChartSeries()");
+	    Console.WriteLine("Null reference harness.thePivotChart.testerror_dumpChartSeries()");
 	}
     }
-
-    public void rebuildChart_click(object sender, EventArgs e)
+    
+    // return true if new bar window is created.
+    // return false if one already exists.
+    public bool launchBarWindow()
     {
-	redrawManual();
-	controlPanel.selectChartRadioFull();
-	
+	if (barWindow != null) return false;
+
+	barWindow = new PmBar(harness);
+	barWindow.FormClosed += (s, e) => 
+	    {
+		barWindow = null;
+		controlPanel.setBarGraphButtonEnabled();
+	    };
+	barWindow.Show();
+	return true;
     }
 
+    public bool isBarWindowActive()
+    {
+	return (barWindow != null);
+    }
 }   //PmGraph
 
 } // namespace PmGraphSpace

@@ -592,7 +592,7 @@ public class PmBar : System.Windows.Forms.Form
 		goto error_out;
 	    }
 	    
-	    for (int i = 0; i < 3; i++) {
+	    for (int i = 0; i < 4; i++) {
 		if (temp[i] > temp[i+1]) {
 		    MessageBox.Show("Numbers must be in an asending order.");
 		    goto error_out;

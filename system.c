@@ -37,6 +37,7 @@
 #include <inttypes.h>
 #include <errno.h>
 
+
 #ifdef _WIN32
 #include <memory.h>
 #include <io.h>
@@ -1347,4 +1348,214 @@ void trace_marker_exit()
 }
 #endif	//_WIN32
 
+#ifdef PMB_NUMA
+/*
+ * find set of nodes covering all cpus in cpuin
+ */
+static
+struct bitmask* numa_nodemask_from_cpumask(struct bitmask* cpuin)
+{
+    int node, i;
+    unsigned int bsz = numa_bitmask_nbytes(cpuin);
+
+    struct bitmask* nodeout;
+
+    nodeout = numa_allocate_nodemask();
+    if (!nodeout) return NULL;
+
+    for (i = 0; i < bsz*8; i++) {
+	if (numa_bitmask_isbitset(cpuin, i)) {
+	    node = numa_node_of_cpu(i);
+	    numa_bitmask_setbit(nodeout, node);
+	}
+    }
+    return nodeout;
+}
+
+/* 
+ * convert cpumask to cpuset
+ * but can't we just memcopy?
+ */
+void sys_numa_cpuset_from_cpumask(cpu_set_t* cpuset, struct bitmask* cpumask)
+{
+    int i;
+    unsigned int bsz = numa_bitmask_nbytes(cpumask);
+
+    CPU_ZERO(cpuset);
+    for (i = 0; i < bsz*8; i++) {
+	if (numa_bitmask_isbitset(cpumask, i)) {
+	    CPU_SET(i, cpuset);
+	}
+    }
+}
+
+void numa_print_bitmask(struct bitmask* bits)
+{
+    int i;
+    unsigned int bsz = numa_bitmask_nbytes(bits);
+    unsigned char* ptr = (unsigned char*)(bits->maskp);
+
+//    printf("bitmask size: %d bytes\n", bsz);
+
+    for (i = 0; i < bsz; i++) {
+	printf("%02x ", ptr[bsz-1-i]);
+    }
+    printf("\n");
+}
+
+int test_parse_numa_option(void)
+{
+    char* cpumap_string = "!0";
+
+    struct bitmask* cpumask ;
+    struct bitmask* nodemask; 
+
+   // printf("possible numa nodes: %d\n", numa_num_possible_nodes());
+    
+    cpumask = numa_parse_cpustring_all(cpumap_string);
+
+    if (!cpumask) {
+	perror("cpumask allocation failed");
+    }
+    
+    nodemask = numa_nodemask_from_cpumask(cpumask);
+    if (!nodemask) {
+	perror("nodemask allocation failed");
+    }
+
+    numa_print_bitmask(cpumask);
+    numa_print_bitmask(nodemask);
+    
+    numa_free_nodemask(nodemask);
+    numa_free_cpumask(cpumask);
+
+    nodemask = numa_parse_nodestring_all("all");
+    numa_print_bitmask(nodemask);
+    return 0;
+}
+
+/*
+ * parse affinity set string from command arg.
+ */
+int populate_new_affinity_set(struct affy_node** head, const char* arg)
+{
+    struct affy_node* prev = *head;
+    struct affy_node* curr;
+    char *dup, *p;
+    
+    curr = malloc(sizeof(*curr));
+    if (!curr) return -1;
+    
+    curr->next = prev;
+    curr->nthreads = 0;
+    dup = strdup(arg);
+    
+    // 1. check for :num_thread option at the end
+    p = strchr(dup, ':');
+    if (p) {	// found
+	char* endptr;
+	long val = strtol(p+1, &endptr, 0);
+	if (*(p+1) == '\0') goto out_err;
+	if (*endptr != '\0') goto out_err;
+	if (val <= 0) goto out_err;
+	curr->nthreads = (int)val;
+	// now chop off ':' and rest
+	*p = '\0';
+    }
+    // 2. parse cpumask & nodemask
+    curr->cpumask = numa_parse_cpustring_all(dup);
+    if (!curr->cpumask) goto out_err;
+
+    curr->nodemask = numa_nodemask_from_cpumask(curr->cpumask);
+    if (!curr->nodemask) goto out_err2;
+
+
+    // 3. get nthreads if we didnt get it from option
+    if (curr->nthreads == 0) {
+	curr->nthreads = numa_bitmask_weight(curr->cpumask);
+    }
+
+    *head = curr;
+
+    free(dup);
+
+    return 0;
+
+out_err2:
+    if (curr->cpumask) numa_free_cpumask(curr->cpumask);
+out_err:
+    if (dup) free(dup);
+    if (curr) free(curr);
+
+    return -1;
+}
+
+int alloc_affy_buffers(struct affy_node* head, size_t num_pfn)
+{
+    char* buf;
+    long ret;
+    struct affy_node* iter;
+    int permissions = PROT_READ;
+    nodemask_t mask; 
+    unsigned long maxnode = numa_num_possible_nodes(); // in bits
+
+    if (params.ratio < 100) permissions |= PROT_WRITE; 
+
+    for (iter = head; iter != NULL; iter = iter->next) {
+	buf = mmap(NULL, num_pfn * PAGE_SIZE, permissions, 
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (buf == MAP_FAILED) {
+	    perror("buf mmap failed");
+	    return 1;
+	}
+	nodemask_zero(&mask);
+	copy_bitmask_to_nodemask(iter->nodemask, &mask);
+	ret = mbind(buf, num_pfn * PAGE_SIZE, MPOL_BIND, &mask.n[0], 
+		maxnode, 0);
+	if (ret) {
+	    perror("buf mbind failed");
+	    return 1;
+	}
+	iter->buf = buf;
+    }
+
+    return 0;
+}
+
+int free_affy_buffers(struct affy_node* head, size_t num_pfn)
+{
+    int ret;
+    struct affy_node* iter;
+
+    for (iter = head; iter != NULL; iter = iter->next) {
+	ret = munmap(iter->buf, num_pfn * PAGE_SIZE);
+
+	if (ret) {
+	    perror("munmap failed");
+	    return 1;
+	}
+
+    }
+    return 0;
+}
+
+void sys_print_affinitysets(struct affy_node* head)
+{
+    int thr_id = 1;
+    int i = 0;
+    int j;
+    struct affy_node* iter = head;
+    for (iter = params.affy_head; iter != NULL; iter = iter->next) {
+	printf("    set %d: nthreads = %d\n", i, iter->nthreads);
+	printf("       cpumask = ");
+	numa_print_bitmask(iter->cpumask);
+	printf("       nodemask = ");
+	numa_print_bitmask(iter->nodemask);
+	printf("       thread ids = ");
+	for (j = 0; j < iter->nthreads; j++) printf("%d ", thr_id++);
+	printf("\n");
+	i++;
+    }
+}
+#endif
 #endif

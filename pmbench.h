@@ -55,15 +55,28 @@
 #else
 #define OPT_TAG_PMB_THREAD " -mt"
 #endif
+#ifdef PMB_NUMA
+#define OPT_TAG_PMB_NUMA " +nu"
+#else
+#define OPT_TAG_PMB_NUMA " -nu"
+#endif
 #ifdef XALLOC
 #define OPT_TAG_XALLOC " +xa"
 #else
 #define OPT_TAG_XALLOC " -xa"
 #endif
 
-#define COMPILE_OPT_TAGS  OPT_TAG_OS OPT_TAG_BITS OPT_TAG_PMB_THREAD OPT_TAG_XALLOC
+#define COMPILE_OPT_TAGS  OPT_TAG_OS OPT_TAG_BITS OPT_TAG_PMB_THREAD OPT_TAG_PMB_NUMA OPT_TAG_XALLOC
 
-#define PMBENCH_VERSION_STR "pmbench 0.8"
+#define PMBENCH_VERSION_STR "pmbench 0.9"
+
+#if !defined(PMB_THREAD) && defined(PMB_NUMA)
+# error "PMB_NUMA option requires PMB_THREAD."
+#endif
+
+#ifdef PMB_NUMA
+struct affy_node;
+#endif
 
 /* 
  * No lock needed for threads access to params.
@@ -92,9 +105,9 @@ typedef struct parameters {
 #endif
     int offset;		// page offset, negative = random
     int ratio;		// % likelihood of read access
-#ifdef PMB_XML
-    uint8_t xml;
     char *xml_path;
+#ifdef PMB_NUMA
+    struct affy_node* affy_head;
 #endif
 } parameters;
 
@@ -102,7 +115,7 @@ extern parameters params;
 
 extern uint32_t freq_khz;
 
-/*benchmark result processing */
+/* benchmark result processing */
 struct bench_result {
     uint64_t total_bench_clock;
     uint64_t total_bench_count;

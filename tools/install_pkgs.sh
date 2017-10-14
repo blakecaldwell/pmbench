@@ -18,6 +18,8 @@ declare -a pkgs_needed=(
  "libuuid-devel.i686"
  "libgcc.i686"
  "glibc-devel.i686"
+ "numactl-devel.x86_64"
+ "numactl-devel.i686"
 )
 
 declare -a to_install=( )

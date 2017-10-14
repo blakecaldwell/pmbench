@@ -16,6 +16,9 @@
 # - mingw32-win-iconv
 # - mingw64-libxml2
 # - mingw64-win-iconv
+#
+# Packages needed for libnuma support:
+# - numactl-devel
 
 
 # 32/64 cross-platform compilation tip:
@@ -66,7 +69,10 @@ endif
 #LFLAGS_LINUX += -Wl,--section-start=.pmbench_code_page=408000
 # uncomment below to compile-in multi-threaded benchmark
 CFLAGS_LINUX += -DPMB_THREAD=1 -pthread
-LFLAGS_LINUX += -pthread 
+LFLAGS_LINUX += -pthread
+# uncomment below to compile-in numa affinityset. Requires threading.
+#CFLAGS_LINUX += -DPMB_NUMA=1 
+#LFLAGS_LINUX += -lnuma
 # uncomment below to add XALLOC
 #CFLAGS_LINUX += -DXALLOC -I../xalloc
 #LFLAGS_LINUX += ../xalloc/libxalloc.a

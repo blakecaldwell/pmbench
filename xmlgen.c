@@ -1,4 +1,3 @@
-#ifdef PMB_XML
 #include <libxml/encoding.h>
 #include <libxml/parser.h>
 #include <libxml/tree.h>
@@ -436,7 +435,6 @@ print_xml_report_post_unmap(const char* path)
     xmlSaveFormatFileEnc(path, xdoc, "utf-8", 1);
 }
 
-#endif
 
 
 

@@ -85,15 +85,17 @@ static struct argp_option options[] = {
     { "initialize", 'i', 0, OPTION_ARG_OPTIONAL, "Initialize memory map with garbage data" },
     { "threshold", 'h', "THRESHOLD", 0, "Set the threshold time to trigger the ftrace log" },
     { "wrneedsrd", 'z', 0, OPTION_ARG_OPTIONAL, "Write is preceeded by read on the same memory" },
-#ifdef PMB_XML
     { "file", 'f', "FILE", 0, "Filename for XML output" },
-#endif
 #ifdef PMB_THREAD
     { "jobs", 'j', "NUMJOBS", 0, "Number of concurrent jobs (threads)" },
 #endif
 #ifdef XALLOC
     { "xalloc", 'x', "REALMEMSIZE", 0, "Non-zero REAMMEMSIZE (MiB) enables xalloc. xmmap uses REALMEMSIZE of real memory" },
     { "xalloc_path", 'X', "PATHNAME", 0, "xalloc backend device pathname. default is /dev/mem0" },
+#endif
+#ifdef PMB_NUMA
+    { "affinityset", 'y', "CPUSTR[:THRCNT]", 0, "Affinity set creation for numa system"
+    },
 #endif
     { 0 }
 };
@@ -129,8 +131,9 @@ void set_default_params(parameters* p)
     p->offset = -1;
     p->get_offset = get_offset_function(-1);
     p->ratio = 50;
-#ifdef PMB_XML
-    p->xml = 0;
+    p->xml_path = NULL;
+#ifdef PMB_NUMA
+    p->affy_head = NULL;
 #endif
 }
 
@@ -157,7 +160,7 @@ void print_params(const parameters* p)
     printf("  offset       = "); if (p->offset < 0) printf("random\n"); else printf("%d\n", p->offset);
     printf("  ratio        = %d%%\n", p->ratio);
     printf("  threshold    = %d\n", p->threshold);
-    printf("  wrneedsrd	   = %d\n", p->write_needs_read);
+    printf("  wrneedsrd    = %d\n", p->write_needs_read);
     if (p->pattern && p->pattern->name) {
 	printf("  pattern      = %s\n", p->pattern->name);
     }
@@ -171,8 +174,16 @@ void print_params(const parameters* p)
     printf("  xalloc_mib   = %d\n", p->xalloc_mib);
     printf("  xalloc_path  = %s\n", p->xalloc_path);
 #endif
+#ifdef PMB_NUMA
+    printf("  affinityset  = ");
+    if (p->affy_head) {
+	printf("\n");
+	sys_print_affinitysets(p->affy_head);
+    } else {
+	printf("NULL\n");
+    }
+#endif
 }
-
 
 /* argp parse callback */
 static
@@ -180,6 +191,10 @@ __attribute__((cold))
 error_t parse_opt(int key, char* arg, struct argp_state* state)
 {
     parameters* param = state->input;
+
+#ifdef PMB_NUMA
+    static int saw_jobs = 0;
+#endif
 
     switch (key) {
     case 'm':
@@ -193,6 +208,13 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     	break;
 #ifdef PMB_THREAD
     case 'j':
+#ifdef PMB_NUMA
+	saw_jobs = 1;
+	if (param->affy_head) {
+	    printf("jobs parameter shouldn't be specified if using affinityset\n");
+	    return ARGP_ERR_UNKNOWN;
+	}
+#endif
     	if (arg) param->jobs = atoi(arg);
     	break;
 #endif
@@ -261,12 +283,27 @@ error_t parse_opt(int key, char* arg, struct argp_state* state)
     case 'z':
 	param->write_needs_read = 1;
 	break;
-#ifdef PMB_XML
     case 'f':
     	if (arg) {
-	   param->xml = 1;
-	   param->xml_path = strdup(arg);
+	    param->xml_path = strdup(arg);
     	}
+    	break;
+#ifdef PMB_NUMA
+    case 'y':
+	if (saw_jobs) {
+	    printf("jobs parameter shouldn't be specified if using affinityset\n");
+	    printf(".\n");
+	}
+    	if (!arg) {
+	    printf("missing string on affinityset argument.\n");
+	    argp_usage(state);
+	    exit(EXIT_FAILURE);
+	}
+	if (populate_new_affinity_set(&param->affy_head, arg)) {
+	    printf("affinityset argument syntax error.\n");
+	    argp_usage(state);
+	    exit(EXIT_FAILURE);
+	}
     	break;
 #endif
     case ARGP_KEY_NO_ARGS: 
@@ -322,6 +359,18 @@ int params_parsing(int argc, char** argv)
 	exit(EXIT_FAILURE);
     }
 #endif
+#ifdef PMB_NUMA
+    /* set jobs param from threads from affyset*/
+    if (params.affy_head) {
+	int thr_sum = 0;
+	struct affy_node* iter;
+	for (iter = params.affy_head; iter != NULL; iter = iter->next) {
+	    thr_sum += iter->nthreads;
+	}
+	params.jobs = thr_sum;
+    }
+//sys_dump_affinity_set_param();
+#endif
     return 0;
 }
 
@@ -369,13 +418,13 @@ struct thread_info {
     pthread_t thread_id;	// returned by pthread_create
 #endif
     int thread_num;	    	// local thread number (1, 2, 3,...)
+    char *map;			// memory map base pointer for access
     struct bench_result result;	// per-thread result
 };
 
 /* thread-shared for concurrency control and shared variable access */
 struct thread_control {
     struct thread_info* tinfo;	// thread info array created
-    char *buf;			// memory map base pointer for access
     char *stats;		// histograms base pointer
     int interrupted;		// ctrl-c sets this
 #ifdef PMB_THREAD
@@ -625,7 +674,7 @@ void* main_bm_thread(void* arg)
     struct thread_info *tinfo = (struct thread_info*)arg;
     int do_memstat = (tinfo->thread_num == 1);
 
-    char* buf = control.buf;
+    char* buf = tinfo->map;
     char* stats = control.stats + ((tinfo->thread_num - 1) * 4096); //worker thread numbers start at 1
 
     struct bench_result* presult = &tinfo->result;
@@ -784,9 +833,11 @@ perform_benchmark_mt(char *buf, char *stats)
     struct thread_info *tinfo;
     pthread_attr_t attr;
     void *res;
+#ifdef PMB_NUMA
+    struct affy_node* iter;
+#endif
 
     pthread_barrier_init(&control.barrier, NULL, num_threads + 1);
-    control.buf = buf;
     control.stats = stats;
 
     s = pthread_attr_init(&attr);
@@ -800,18 +851,43 @@ perform_benchmark_mt(char *buf, char *stats)
 
     control.tinfo = tinfo;
 
+#ifdef PMB_NUMA
+    if (params.affy_head) {
+	i = 0;
+	for (iter = params.affy_head; iter != NULL; iter = iter->next) {
+	    int j;
+	    cpu_set_t cpuset;
+	    sys_numa_cpuset_from_cpumask(&cpuset, iter->cpumask);
+	    s = pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset);
+	    if (s != 0) handle_error_en(s, "pthread_attr_setaffinity");
+
+	    for (j = 0; j < iter->nthreads; j++) {
+		tinfo[i].thread_num = i + 1;
+		tinfo[i].map = iter->buf;
+		reset_result(&tinfo[i].result);
+
+		s = pthread_create(&tinfo[i].thread_id, &attr,
+				&main_bm_thread, &tinfo[i]);
+		if (s != 0) handle_error_en(s, "pthread_create");
+		i++;
+	    }
+	}
+    } else 
+#endif
     for (i = 0; i < num_threads; i++) {
     	tinfo[i].thread_num = i + 1;
     	reset_result(&tinfo[i].result);
+	tinfo[i].map = buf;
 
     	s = pthread_create(&tinfo[i].thread_id, &attr,
     			&main_bm_thread, &tinfo[i]);
     	if (s != 0) handle_error_en(s, "pthread_create");
     }
+
     s = pthread_attr_destroy(&attr);
     if (s != 0) handle_error_en(s, "pthread_attr_destroy");
 
-	/* gate control for warmup finish */
+    /* sync on warmup finish */
     thread_sync(TS_WARMUP_DONE);
 
     /* check again for ctrl-c interruption */
@@ -850,10 +926,10 @@ perform_benchmark_st(char *buf, char *stats)
     tinfo = calloc(1, sizeof(struct thread_info));
     if (tinfo == NULL) exit(EXIT_FAILURE);
     tinfo->thread_num = 1;
+    tinfo->map = buf;
     reset_result(&tinfo->result);
 
     control.tinfo = tinfo;
-    control.buf = buf;
     control.stats = stats;
     control.interrupted = 0;
 
@@ -1002,6 +1078,9 @@ int main(int argc, char** argv)
     set_default_params(&params);
     params_parsing(argc, argv);
     disable_core_dump();
+
+//test_parse_numa_option();
+
     if (!is_tsc_invariant()) {
 	prn("WARNING: CPU does not support constant-rate rdtsc. Results obtained via rdtsc(p) may be inaccurate!\n");
     }
@@ -1058,8 +1137,9 @@ int main(int argc, char** argv)
 
     	// xmmap returns memory unscrubbed. zero out the memory.
     	memset(buf, 0, map_num_pfn << 12);
-    } else {
+    } else
 #endif
+    {
 #ifdef _WIN32
 	buf = VirtualAlloc(NULL, map_num_pfn * PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	if (buf == NULL) {
@@ -1069,57 +1149,90 @@ int main(int argc, char** argv)
 	    return 1;
 	}
 
-	stats = VirtualAlloc(NULL, 4096 * params.jobs, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	stats = VirtualAlloc(NULL, PAGE_SIZE * params.jobs, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	if (stats == NULL) {
 	    ret = GetLastError();
 	    prn("stats VirtualAlloc failed. Error:%d\n", ret);
 	    return 1;
 	}
-	
 #else
-	int permissions = PROT_READ;
-	if (params.ratio < 100) permissions |= PROT_WRITE; 
+#ifdef PMB_NUMA
+	if (params.affy_head) {
+	    long r;
+	    ret = alloc_affy_buffers(params.affy_head, map_num_pfn);
+	    if (ret) return 1;
 
-	buf = mmap(NULL, map_num_pfn * PAGE_SIZE, permissions, 
-		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (buf == MAP_FAILED) {
-	    perror("buf mmap failed");
-	    return 1;
-	}
-	// memory for histogram. 1 page per thread; read and write statistics get 2k each
-	stats = mmap(NULL, (size_t)(4096 * params.jobs), 
-		PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); 
-	if (stats == MAP_FAILED) {
-	    perror("stats mmap failed");
-	    return 1;
+	    // memory for histogram. 
+	    // 1 page per thread; read and write statistics get 2k each
+	    stats = mmap(NULL, (size_t)(PAGE_SIZE * params.jobs), 
+		    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); 
+	    if (stats == MAP_FAILED) {
+		perror("stats mmap failed");
+		return 1;
+	    }
+//TODO: check for kernel >= 3.8 for MPOL_LOCAL kernel support
+#ifndef MPOL_LOCAL
+#define MPOL_LOCAL 4
+#endif
+	    r = mbind(stats, PAGE_SIZE * params.jobs, MPOL_LOCAL, NULL, 0, 0);
+	    if (r) {
+		perror("stats mbind() failed");
+		return 1;
+	    }
+	    buf = NULL;
+	} else 
+#endif
+	{
+	    int permissions = PROT_READ;
+	    if (params.ratio < 100) permissions |= PROT_WRITE; 
+
+	    buf = mmap(NULL, map_num_pfn * PAGE_SIZE, permissions, 
+		    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	    if (buf == MAP_FAILED) {
+		perror("buf mmap failed");
+		return 1;
+	    }
+
+	    // memory for histogram. 
+	    // 1 page per thread; read and write statistics get 2k each
+	    stats = mmap(NULL, (size_t)(PAGE_SIZE * params.jobs), 
+		    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); 
+	    if (stats == MAP_FAILED) {
+		perror("stats mmap failed");
+		return 1;
+	    }
 	}
 #endif
 	//XXX fill in garbage 
+	//PMB_NUMA - main thread shouldn't be touching the map..
+	//FIXME .. for now don't allow init when affinityset is set
 	if (params.init_garbage) {
-	    prn("Initializing memory map...\n");
-	    int i, j;
-	    uint64_t state = 0x0ddfadedbeefd00d;
-	    uint32_t val;
-	    struct stopwatch sw_init;
-	    sw_reset(&sw_init, params.tsops);
-	    sw_start(&sw_init);
-	    for (i = 0; i < map_num_pfn; i++) {
-		for (j = 0; j < PAGE_SIZE; j+=4) {
-		    state = state * 6364136223846793005ull + 1442695040888963407ull;
-		    val = (uint32_t)(state >> 33);
-		    buf[i*PAGE_SIZE + j] = val;
+	    if (buf == NULL) { 
+		prn("Fixme: can't init the map when affinityset is set. proceeding without initializing");
+	    } else {
+		prn("Initializing memory map...\n");
+		int i, j;
+		uint64_t state = 0x0ddfadedbeefd00d;
+		uint32_t val;
+		struct stopwatch sw_init;
+		sw_reset(&sw_init, params.tsops);
+		sw_start(&sw_init);
+		for (i = 0; i < map_num_pfn; i++) {
+		    for (j = 0; j < PAGE_SIZE; j+=4) {
+			state = state * 6364136223846793005ull + 1442695040888963407ull;
+			val = (uint32_t)(state >> 33);
+			buf[i*PAGE_SIZE + j] = val;
+		    }
 		}
+		sw_stop(&sw_init);
+		prn("Initialization took %0.4f ms\n", ((float)sw_get_usec(&sw_init))/1000.0);
 	    }
-	    sw_stop(&sw_init);
-	    prn("Initialization took %0.4f ms\n", ((float)sw_get_usec(&sw_init))/1000.0);
 	}
 #ifdef _WIN32
 	else prn("WARNING: uninitialized memory causes side effect on" 
 		" OS with memory compression and deduplication.\n");
 #endif
-#ifdef XALLOC
     }
-#endif
     //debug_verify_distributions();
     sys_stat_mem_init(&mem_ctx);
     control.interrupted = 0;
@@ -1135,11 +1248,11 @@ int main(int argc, char** argv)
 #endif
 
     print_con_report(stats, &params);
-#ifdef PMB_XML
-    if (params.xml) print_xml_report(stats, &params, control.interrupted);
-#endif
+
+    if (params.xml_path) print_xml_report(stats, &params, control.interrupted);
 
     free(control.tinfo);
+
 #ifdef _WIN32
 #ifdef XALLOC
     if (params.xalloc_mib) {
@@ -1148,8 +1261,9 @@ int main(int argc, char** argv)
 	    perror("xunmap failed");
 	    goto report_no_unmap;
 	}
-    } else {
+    } else
 #endif
+    {
 	// VirtualFree requires dwSize to be 0 when memory region is released
 	ret = VirtualFree(buf, 0, MEM_RELEASE);	
 	if (!ret) {
@@ -1163,10 +1277,7 @@ int main(int argc, char** argv)
 	    prn("VirtualFree stats failed. Error:%d", ret);
 	    goto report_no_unmap;
 	}
-
-#ifdef XALLOC
     }
-#endif
 #else
 #ifdef XALLOC
     if (params.xalloc_mib) {
@@ -1175,31 +1286,39 @@ int main(int argc, char** argv)
 	    perror("xunmap failed");
 	    goto report_no_unmap;
 	}
-    } else {
+    } else
 #endif
-	ret = munmap(buf, map_num_pfn * PAGE_SIZE);
+    {
+#ifdef PMB_NUMA
+	if (params.affy_head) {
+	    ret = free_affy_buffers(params.affy_head, map_num_pfn);
+	    if (ret) {
+		perror("free_affy_buffers failed");
+		goto report_no_unmap;
+	    }
+	} else 
+#endif
+	{
+	    ret = munmap(buf, map_num_pfn * PAGE_SIZE);
 
-	if (ret) {
-	    perror("munmap failed");
-	    goto report_no_unmap;
+	    if (ret) {
+		perror("munmap failed");
+		goto report_no_unmap;
+	    }
 	}
 
-	ret = munmap(stats, (size_t)(4096 * params.jobs));
+	ret = munmap(stats, (size_t)(PAGE_SIZE * params.jobs));
 	if (ret) {
 	    perror("stats munmap failed");
 	    goto report_no_unmap;
 	}
-#ifdef XALLOC
     }
-#endif
 #endif
     sys_stat_mem_update(&mem_ctx, &mem_info_after_unmap);
     printf("  (delta) :"); sys_stat_mem_print_delta(&mem_info_after_run, &mem_info_after_unmap);
     printf("post unmap:"); sys_stat_mem_print(&mem_info_after_unmap);
 
-#ifdef PMB_XML
-    if (params.xml) print_xml_report_post_unmap(params.xml_path);
-#endif
+    if (params.xml_path) print_xml_report_post_unmap(params.xml_path);
 
     sys_stat_mem_exit(&mem_ctx);
 

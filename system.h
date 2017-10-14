@@ -56,6 +56,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#ifdef PMB_NUMA
+#include <numa.h>
+#include <numaif.h>
+#include <sched.h>
+#endif
 
 #include "rdtsc.h"
 
@@ -214,8 +219,6 @@ extern struct sys_timestamp perfc_ops;
 
 extern struct sys_timestamp* get_timestamp_from_name(const char* str);
 
-#define SYS_PMBENCH_VERSION_STRING "pmbench 0.4"
-
 extern void sys_print_pmbench_info();
 extern void sys_print_os_info();
 extern int sys_print_time_info();
@@ -303,4 +306,22 @@ extern void trace_marker_exit();
 extern int gl_tlb_info_buf_len;
 extern int gl_det_cache_info_len;
 extern int gl_goodtime;
+
+
+#ifdef PMB_NUMA
+/* single linked list */
+struct affy_node {
+    struct affy_node* next;
+    int nthreads;
+    struct bitmask* cpumask;
+    struct bitmask* nodemask;
+    char* buf;
+};
+extern void sys_numa_cpuset_from_cpumask(cpu_set_t* cpuset, struct bitmask* cpumask);
+extern void sys_print_affinitysets(struct affy_node* head);
+extern int populate_new_affinity_set(struct affy_node** head, const char* arg);
+extern int alloc_affy_buffers(struct affy_node* head, size_t num_pfn);
+extern int free_affy_buffers(struct affy_node* head, size_t num_pfn);
+#endif
+
 #endif

@@ -1,6 +1,6 @@
 .\" groff -man -Tascii pmbench.1
 .\" Manpage for pmbench..
-.TH PMBENCH 1 "January 2014" "pmbench v0.7" "User Commands"
+.TH PMBENCH 1 "October 2017" "pmbench v0.9" "User Commands"
 .SH NAME
 pmbench \- paging and virtual memory benchmark
 .SH SYNOPSIS
@@ -60,6 +60,7 @@ See Usage for details.
 .RS
 Number of concurrent worker threads to spawn for the benchmark.
 Some releases may not support this option. The default is 1.
+Cannot be used in conjunction with affinityset option.
 .RE
 .P
 \fB-t, --timestamp\fP=TIMESTAMP_METHOD
@@ -71,6 +72,24 @@ Specify system time-measurement method. Choose from `rdtsc', `rdtscp', or `perfc
 The default is `rdtsc'.
 .RE
 .P
+\fB-y, --affinityset\fP=CPUSTR[:NUM_THREADS]
+.RS
+Create an affinity set to which worker threads and memory map are bound in a NUMA system.
+Multiple affinity sets are created when specified multiple times.
+CPUSTR is a comma-separated list of cpu numbers or cpu rangee, such as 1,3,5,7 or 4-7.
+If optional NUM_THREADS is specified, NUM_THREADS number of worker threads are spawned for the set. If not, as many threads are spawned as the number of cpus in the CPUSTR.
+.P
+The worker threads are to be scheduled only on CPUSTR, accessing a memory map which is bound to NUMA node(s) for the set.
+The pmbench calculates NUMA node(s) from CPUSTR.
+Jobs option (-j) cannot be specified along with this option. 
+.RE
+.P
+\fB-r, --ratio\fP=RATIO
+.RS
+Specify the read percentage of read/write ratio. 0 = write only, 100 = read only. Default is 50.
+.RE
+
+.P
 \fB-q, --quiet\fP
 .RS
 Do not display any message till benchmark completion.
@@ -81,12 +100,21 @@ Do not display any message till benchmark completion.
 Do not perform warm-up accesses before the main benchmark.
 .RE
 .P
-\fB-a, --access\fP=ACCESS_METHOD
+\fB-i, --initialize\fP
 .RS
-(Under development) Specify memory access method.
-Choose from `histo' or `touch'. The default is `histo'.
+Initialize memory map with random data before measurement. Can be useful to avoid memory compression side effect.
 .RE
 
+.P
+\fB-f, --file\fP=FILENAME
+.RS
+Specify the path name of the XML output file.
+.RE
+.P
+\fB-z, --wrneedsrd\fP
+.RS
+Write access is always preceded by a read access. Simulates old pmbench access behaviour.
+.RE
 .P
 \fB-?, --help\fP
 .RS
@@ -203,6 +231,15 @@ Unlike the normal distribution, this pattern has a long-tail, which can be a
 good proxy for a real-world page access pattern.
 .RE
 
+.P
+\fBpmbench\fP -m512 -s512 --affinityset=1,3,5,7:8 --affinityset=0,2,4,6:8 60
+.RS
+The benchmark creates two affinity sets. Each set creates 8 worker threads that are attached to the specified 4 cpus.
+Each set creates its own 512MiB memory, which is bound to the NUMA node(s) to which the cpus belong.
+.P
+In total, 16 threads are created, and 1024MiB of system memory is consumed.  
+.RE
+
 .SH "BENCHMARK REPORT"
 At the end of the run, a human-readable report is generated to the standard output.
 The report is divided into multiple sections. 
@@ -267,8 +304,9 @@ A user may interrupt the benchmark in the middle by sending a SIGINT signal
 
 
 .SH "SEE ALSO"
-.BR getrlimit (2)
-.\".BR getrlimit (2)
+.BR getrlimit (2), 
+.BR numa (3),
+.BR mbind (2)
 
 .SH BUGS
 Command syntax, options, and features will change significantly in future,
@@ -282,4 +320,4 @@ User can't control the length of warm-up - it may take very very long in certain
 .SH TRADEMARKS
 Windows is a registered trademark of Microsoft Corporation.
 .SH AUTHOR
-Written by Jisoo Yang <jisoo.yang@intel.com>
+Written by Jisoo Yang <jisoo.yang@unlv.edu>

@@ -103,7 +103,7 @@ LXML := -lxml2
 all: pmbench pmbench.exe
 
 pmbench: pmbench.o pattern.o system.o access.o xmlgen.o
-	$(CC) $+ -lm -luuid $(LXML) -o $@ $(LFLAGS_LINUX)
+	$(CC) $+ -luserfault_client -lm -luuid $(LXML) -o $@ $(LFLAGS_LINUX)
 	objdump -d $@ > $@.dmp
 
 

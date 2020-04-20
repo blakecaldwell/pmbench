@@ -47,6 +47,7 @@
 #include "argp.h"
 #else 
 #include <sys/mman.h>
+#include <userfault-client.h>
 #include <sys/resource.h>
 #include <argp.h>
 #endif
@@ -1184,10 +1185,10 @@ int main(int argc, char** argv)
 #endif
 	{
 	    int permissions = PROT_READ;
+            int ufd;
 	    if (params.ratio < 100) permissions |= PROT_WRITE; 
 
-	    buf = mmap(NULL, map_num_pfn * PAGE_SIZE, permissions, 
-		    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            buf = allocate_userfault(&ufd,  map_num_pfn * PAGE_SIZE);
 	    if (buf == MAP_FAILED) {
 		perror("buf mmap failed");
 		return 1;

@@ -687,7 +687,6 @@ void* main_bm_thread(void* arg)
     struct sys_timestamp* tsops = p->tsops;
     struct stopwatch sw;
     int i;
-    uint64_t tenk;
     uint64_t done_tsc, now;
 
     uint32_t* a_addr;
@@ -707,7 +706,7 @@ void* main_bm_thread(void* arg)
 
     size_t num_pages = p->setsize_mib * 256;
     size_t iter_warmup;
-    int iter_patternlap = 1000000; // draw 1000000
+    int iter_patternlap = num_pages; // number of draw equal to number of pages
     void* ctx = pattern->alloc_pattern(num_pages, p->shape, tinfo->thread_num);
 
     prn("[%d] num_pages: %ld (%ld MiB), shape: %0.4f\n", tinfo->thread_num, num_pages, num_pages/256, p->shape);
@@ -767,42 +766,36 @@ void* main_bm_thread(void* arg)
     thread_sync(TS_MAIN_BM_START);
     prn("[%d] Starting main benchmark\n", tinfo->thread_num);
 
-    tenk = 0;
-
     done_tsc = (uint64_t)p->duration_sec * freq_khz * 1000;
     if (do_memstat) alarm_arm(tinfo->thread_num - 1, tsops->timestamp() + (done_tsc / 2), mem_info_oneshot, &mem_ctx);
     done_tsc += sw_start(&sw);
 	
-    while ((now = tsops->timestamp()) < done_tsc) {
-	alarm_check(now);
-	for (i = 0; i < 10000; ++i) {
-	    a_addr = calc_address(buf, pattern->get_next(ctx));
-	    a_addr += p->get_offset(&rand_ctx_offset);
-	    is_write = (roll_dice(&rand_ctx_action) % 1024) < rat_scaled ? 0 : 1;
-	    if (is_write && p->write_needs_read) is_write = 2;
+    alarm_check(now);
+    for (i = 0; i < num_pages; ++i) {
+	a_addr = calc_address(buf, pattern->get_next(ctx));
+	a_addr += p->get_offset(&rand_ctx_offset);
+	is_write = (roll_dice(&rand_ctx_action) % 1024) < rat_scaled ? 0 : 1;
+	if (is_write && p->write_needs_read) is_write = 2;
 
-	    latency_ns = access->exercise(a_addr, is_write);
+	latency_ns = access->exercise(a_addr, is_write);
 
-	    access->record(stats, latency_ns, is_write);
+	access->record(stats, latency_ns, is_write);
 #ifndef _WIN32
-	    if (params.threshold > 0) mark_long_latency(latency_ns);
+	if (params.threshold > 0) mark_long_latency(latency_ns);
 #endif
-	    if (p->delay > 10) sys_delay(p->delay);
-	}
-	tenk++;
-    	if (control.interrupted) break;
+	if (p->delay > 10) sys_delay(p->delay);
     }
     sw_stop(&sw);
 
     if (do_memstat) sys_stat_mem_update(&mem_ctx, &mem_info_after_run);
 
     presult->total_bench_clock = sw.elapsed_sum;
-    presult->total_bench_count = tenk * 10000;
+    presult->total_bench_count = num_pages;
 
     prn("[%d] Benchmark done - took %0.3f sec for %d page access\n"
         "  (Average %0.3f usec per page access)\n", tinfo->thread_num,
-	(float)sw_get_usec(&sw)/1000000.0f, tenk*10000,
-	(float)sw_get_usec(&sw)/(tenk*10000));
+	(float)sw_get_usec(&sw)/1000000.0f, num_pages,
+	(float)sw_get_usec(&sw)/(num_pages));
 
     pattern->free_pattern(ctx);
 
@@ -1184,7 +1177,7 @@ int main(int argc, char** argv)
 #endif
 	{
 	    int permissions = PROT_READ;
-	    if (params.ratio < 100) permissions |= PROT_WRITE; 
+	    if (params.ratio < 100 || params.init_garbage) permissions |= PROT_WRITE;
 
 	    buf = mmap(NULL, map_num_pfn * PAGE_SIZE, permissions, 
 		    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -1226,6 +1219,12 @@ int main(int argc, char** argv)
 		}
 		sw_stop(&sw_init);
 		prn("Initialization took %0.4f ms\n", ((float)sw_get_usec(&sw_init))/1000.0);
+		prn("Dropping caches...\n");
+		static const char command[] = "/opt/drop_caches.sh";
+		int rc = system(command);
+		if (rc != 0) {
+		    prn("drop_caches.sh returned %d\n", rc);
+		}
 	    }
 	}
 #ifdef _WIN32
